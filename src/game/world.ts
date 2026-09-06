@@ -292,6 +292,7 @@ export class World {
     }
     this.beanStalk = null;
     this.flags.add(`seen:${key}`); // 地图迷雾：到过的房间才上地图（随 flags 自动入存档）
+    this.arrivalGlow = 2.5; // 到达新房间：玩家灯短暂增强（辨认辅助），随时间衰减
     this.mapDirty = true; // 新到访的房间要烙进全局地图
     const entities: Entity[] = [];
     (def.objects ?? []).forEach((o: ObjDef, i: number) => {
@@ -577,6 +578,7 @@ export class World {
     }
     this.updateBean(input);
 
+    this.arrivalGlow = Math.max(0, this.arrivalGlow - 1 / 60);
     // 停泊中的豆茎倒计时（只在世界的活帧走：暂停/地图/转场都不烧时间）
     if (this.parkedStalk) {
       this.parkedStalk.timer -= 1 / 60;
@@ -1301,6 +1303,13 @@ export class World {
     this.camY = this.cy * ROOM_H;
   }
 
+  /** 换房到达后的辨认辅助：玩家灯短暂增强（无光源新房间不至于一片死黑分不清是否已换房）。 */
+  private arrivalGlow = 0;
+
+  private playerGlowBoost(): number {
+    return this.arrivalGlow > 0 ? Math.min(0.35, this.arrivalGlow * 0.35) : 0;
+  }
+
   // ---- 结局 ----
 
   startEnding(): void {
@@ -1403,7 +1412,7 @@ export class World {
     const px = this.player.x + ox;
     const py = this.player.y + oy;
     const flicker = Math.sin(this.time * 11) * 2.2 + Math.sin(this.time * 5.3) * 1.8;
-    const pg = this.debugPlayerGlow;
+    const pg = Math.min(1, this.debugPlayerGlow + this.playerGlowBoost());
     lights.push({
       x: px,
       y: py,

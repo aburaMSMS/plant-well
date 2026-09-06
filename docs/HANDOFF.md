@@ -177,6 +177,13 @@ docs/learn/         m0–m8 讲解文档（每里程碑一篇，含练习题）
 
 **第廿九批（2026-09-05，地图数据 JSON 化）**：见 §廿九。MAP_LIST 从 maps.ts 内联字面量改为 **`src/data/maps/<id>.json` 一图一文件** + `src/data/gameMap.json`（★游戏图）；maps.ts 缩为类型+glob 派生；保存通道按文件粒度（`/__save/map/<ID>`、`/__save/game`、DELETE 删图）；TS 拼接/注释回填机制整体退役。顺带：删物件联动清理双向绑定引用；修复数据里 plate M8XR4D 指向已不存在的电梯 54JW9S 的悬空引用（该电梯在迁移前的数据里已被删除）。
 
+## ⚠ compact 后待办（第一个任务）：用 CDP 追"跨房视角不跟"问题
+
+**用户 bug**：从 2,0 走右到 3,0（R21，用户手建的新房）后，"角色明明已经在另一个房间了，视角还停留在当前房间"。另注：3,0 的洞腔与 2,0 洞口对齐、无光源，换房后画面几乎不变——"视角没动"的**体感**可能部分来自这个（两房视觉连续+太黑），但用户在 zcode 内置浏览器也复现了，需真查。
+**已验证正常的部分**（无头探针实测）：checkTransitions→fade→loadRoom 链路正确（cx/cy/相机残差/玩家位置全对）；换房黑场眨眼有触发。**用户复现环境是 zcode 内置浏览器**（GameViewer webview），无头 Edge 探针未复现——**怀疑点：内置浏览器（webview2）下 rAF/fade 时序不同，或用户看到的是 fade 冻结期间**。
+**CDP 追踪法**（本轮已验证可行）：无头起窗加 `--remote-debugging-port=9223`（background bash 保持存活），用 `curl localhost:9223/json` 拿 targets，或直接 playwright `chromium.connectOverCDP('http://localhost:9223')` 连**用户正在操作的页面**实时采样：`w.cx/camX-cx*320 残差/player 坐标/debugLog`。
+**注意**：本轮未提交的 M01.json（用户在编辑器里改了 R19 竖井/藤）、decor.ts/world.ts（视觉+提亮批次）都是**用户的合法编辑**，别当垃圾回滚！
+
 **第卅九批（2026-09-06，五项体验修正）**：
 1. **藤摆幅略增**：风 0.06→0.085、拨藤冲量 0.02→0.026、角速度上限 1.8→2.1、阻尼 2.4→2.2。
 2. **传送光标贴边跟随**：舒适带收紧（56/40→48/32）——光标贴边时视野跟随更积极，不再"光标出图消失"；与 Tab 地图同一套 band+pan 手感。
