@@ -209,7 +209,7 @@ footprint 与框的重叠面积 ≥ 物件面积一半（或被框完全包含�
    b. 用户报"撤销只能回退一次"未复现（探针验证多步撤销正常）——若复现，查其操作序列与浏览器旧 JS 缓存
    d. 地图存储：**已闭环（第廿七批）**——单文件扩展性以多地图结构解决：src/data/maps.ts 的 MAP_LIST 装任意多张图，编辑器可新建/导入/导出/★设为游戏图。游戏内跨图传送未做（MapDef.id 是预留钩子）。若单文件将来过大再议按文件拆分
 1. **第九批+第八批尾巴的回归全都没跑**（等用户发话）：bubble-shield（场景4 已挪 col25 无藤柱位）、chain（陆跳式摆荡起跳后落点窗口大概率要重调）、vine / escape / use-buffer / music / e2e / room-cross / feature-batch / softlock / content / whip——全部脚本已同步新键位（K=跳 J=用）与新开机门（两次 Enter），跑之前先 `npm run test:rooms` 校验 rooms.ts（压力板/小树均为物件表追加）。**注意：新关键值（CRUMBLE_*、电梯速度、lens 语义、scale）无专属回归脚本；softlock 断言的 `vinebud:2,0#2` 等键现在与游戏真实键一致（第廿五批修复后）**
-2. **没有 git 仓库**——用户已被告知，等确认后 `git init` + 首次提交
+2. **git 已建（第卅七批）**：`git init -b main` + 完整 .gitignore（忽略 node_modules/dist/.wrangler/.playwright-mcp/wav 产物/临时文件）+ `.gitattributes`（`* text=auto eol=lf`）+ 首次提交 57bd9c7（86 文件，.git 23MB；音乐只收 mp3 母带）。**GitHub 远端未建**（gh CLI 不可用、无 SSH key、凭据管理器无 GitHub 条目）——需用户在 github.com 建仓后 `git remote add origin git@github.com:<user>/plant-well.git && git push -u origin main`；推上去后可在 Cloudflare Pages → 项目 Settings → Git integration 绑定仓库，push 即自动部署（部署命令 `npm run build`，输出目录 `dist`）。未绑前保持 `npm run deploy` 手动部署
 3. 摆荡新上限的手感待真人验证（SWING_OMEGA_MAX 9、摆荡起跳 vy=−JUMP_VEL×1.3 切向——constants.ts/player.ts）
 4. 已部署 Cloudflare Pages（plant-well.pages.dev，`npm run deploy`）；`npm run build` 的 dist/ 是纯静态，任意静态托管均可。注：wrangler 不在 devDependencies，deploy 时临时拉取
 5. 花苞被笛子吹开后永久保留（存档 flag；重进房间不再重播开花动画），无"重新闭合"机制——若做周目可考虑
