@@ -977,6 +977,15 @@
             "x": 5,
             "y": 13
           }
+        },
+        {
+          "type": "crumble",
+          "location": {
+            "room_id": "R14",
+            "x": 15,
+            "y": 14
+          },
+          "w": 3
         }
       ]
     },
@@ -1414,11 +1423,15 @@
             "y": 14
           },
           "end": {
-            "room_id": "R15",
+            "room_id": "R14",
             "x": 16,
             "y": 11
           },
-          "id": "FQ84CK"
+          "id": "FQ84CK",
+          "back": true,
+          "triggeredBy": [
+            "MDUWGX"
+          ]
         },
         {
           "type": "candle",
@@ -1428,6 +1441,19 @@
             "y": 7
           },
           "intensity": 2
+        },
+        {
+          "type": "plate",
+          "id": "MDUWGX",
+          "location": {
+            "room_id": "R15",
+            "x": 7,
+            "y": 14
+          },
+          "controls": [
+            "FQ84CK"
+          ],
+          "reset": 1
         }
       ]
     },

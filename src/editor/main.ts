@@ -1514,20 +1514,15 @@ canvas.addEventListener("pointerdown", (e) => {
   }
   switch (tool) {
     case "rect": {
-      // 矩形填充：建筑材料（岩壁/空气）拖拽画矩形，材料=调色板当前选中的瓦片
-      if (roomKey !== curKey) {
-        log("矩形填充只作用于当前房间——先切到那间再填。", "warn");
-        return;
-      }
+      // 矩形填充：建筑材料（岩壁/空气）拖拽画矩形，材料=调色板当前选中的瓦片。
+      // 落在邻房=直接切工作房执行（用户要求：在哪个房操作就编辑哪个房）
+      if (roomKey !== curKey) gotoRoom(roomKey);
       rectAnchor = tile;
       break;
     }
     case "place": {
       if (palSel.kind === "tile") {
-        if (roomKey !== curKey) {
-          log("瓦片铺设只作用于当前房间——先切到那间再铺。", "warn");
-          return;
-        }
+        if (roomKey !== curKey) gotoRoom(roomKey);
         // 建筑类：长按拖动铺设（空气=擦除）
         paintValue = brushTile;
         paintPre = doc.beginLive();

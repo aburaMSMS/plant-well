@@ -27,34 +27,58 @@ async function boot(url) {
   await page.waitForTimeout(500); // 首帧/音频解码抖动余量
 }
 
-// ---- 场景 1：电梯载客单程（(2,4) 竖井电梯：进房即被吞入→上行到站→停住不再自动回航）----
+// ---- 场景 1：电梯载客单程（(1,4) 同房竖井电梯 K25B6Y：进房被吞→到站→停住不回航）----
 {
-  await boot(`${BASE}/?debug=1&room=2,4`);
+  // 该梯 persist flag 若在（上次运行遗留），清掉重载恢复原位
+  await page.goto(`${BASE}/?debug=1&room=1,4`);
+  await page.waitForFunction(() => !!window.__pw, null, { timeout: 20000 });
+  await page.evaluate(() => {
+    const w = window.__pw.world;
+    for (const f of [...w.flags]) if (f.startsWith("lift:K25B6Y")) w.flags.delete(f);
+  });
+  await page.reload();
+  await page.waitForFunction(() => !!window.__pw, null, { timeout: 20000 });
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(1100);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => window.__pw?.mode === "game", null, { timeout: 15000 });
+  await page.waitForTimeout(400);
   const s1 = await page.evaluate(() => {
     const w = window.__pw.world;
-    const el = w.room.entities.find((e) => e.homeKey !== undefined && e.endOff !== undefined);
+    const el = w.room.entities.find((e) => e.endOff !== undefined);
     return { found: !!el, key: w.cx + "," + w.cy, n: w.room.entities.length };
   });
-  ok("电梯实体存在 @2,4", s1.found, JSON.stringify(s1));
+  ok("电梯实体存在 @1,4", s1.found, JSON.stringify(s1));
   if (s1.found) {
-    // debug 出生点在笼口下会被吞入（起步端）；等它到站吐客并停稳
+    // 把玩家挪到笼口站好（data 出生点不在笼口下）——等 0.25s 登乘判定吞入
+    await page.evaluate(() => {
+      const w = window.__pw.world;
+      const el = w.room.entities.find((e) => e.endOff !== undefined);
+      w.player.x = el.rect.x + el.off.x + 5;
+      w.player.y = el.rect.y + el.off.y + 14;
+      w.player.vy = 0;
+    });
     const r1 = await page.evaluate(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const w = window.__pw.world;
       const el = w.room.entities.find((e) => e.endOff !== undefined);
-      const st = { rode: false, settled: false, state: "", end: -1, off: 0 };
+      const st = { rode: false, settled: false, state: "", end: -1 };
       for (let i = 0; i < 160; i++) {
         if (w.hidePlayer) st.rode = true;
+        // 物理会盖位置：持续把玩家钉回笼口（grounded 由落地给）
+        if (!el.riding) {
+          w.player.x = el.rect.x + el.off.x + 5;
+          w.player.vy = 0;
+        }
         await sleep(50);
+        if (el.state === "idle" && el.end === 1 && !w.hidePlayer) break;
       }
       st.state = el.state;
       st.end = el.end;
-      st.off = el.off.x + el.off.y;
-      st.settled = el.state === "idle" && !w.hidePlayer;
+      st.settled = el.state === "idle" && el.end === 1 && !w.hidePlayer;
       return st;
     });
     ok("载客上行到站", r1.rode && r1.settled, JSON.stringify(r1));
-    // 单程语义：吐客停稳后，站在到站端等一会——不应出现自动回航（笼子留在原地）
     const r2 = await page.evaluate(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const w = window.__pw.world;

@@ -1096,6 +1096,11 @@ export class VineStalk extends BaseEntity {
     this.y = tyGround * TILE; // 地表：茎从这里钻出
     this.chain.push({ x: tx, y: tyGround - 1 }); // 根节 = 脚下地表上方的空气格
   }
+  /** 寿命回满（跨房停泊返回时调用：5s 内回来=茎完好如初）。 */
+  refresh(): void {
+    this.life = BEAN_LIFE;
+  }
+
   update(w: World): void {
     const dt = 1 / 60;
     this.t += dt;
@@ -1274,7 +1279,7 @@ export class HangingVine extends BaseEntity {
     const b = w.player.box;
     for (const st of this.strands) {
       // 单摆积分：重力回复 + 阻尼 + 环境微风；长藤周期长，摆起来更"沉"
-      const acc = -13 * Math.sin(st.angle) - 2.4 * st.angVel + Math.sin(w.time * 0.9 + st.ph) * 0.06;
+      const acc = -13 * Math.sin(st.angle) - 2.2 * st.angVel + Math.sin(w.time * 0.9 + st.ph) * 0.085;
       st.angVel += acc * dt;
       st.angle += st.angVel * dt;
       // 玩家贴近这一条 → 拨到：冲量只与横向速度成正比（站着不动=零冲量，藤靠阻尼自己停稳）；
@@ -1285,8 +1290,8 @@ export class HangingVine extends BaseEntity {
       const x1 = Math.max(sx, tip) + 5;
       const y1 = this.y + st.len + 6;
       if (b.x0 < x1 && b.x1 > x0 && b.y0 - 6 < y1 && b.y1 > this.y - 4) {
-        st.angVel += (w.player.vx * 0.02) / Math.max(26, st.len);
-        st.angVel = Math.max(-1.8, Math.min(1.8, st.angVel));
+        st.angVel += (w.player.vx * 0.026) / Math.max(26, st.len);
+        st.angVel = Math.max(-2.1, Math.min(2.1, st.angVel));
       }
       // 护罩破裂：罩身与这一条的实际区段相交 → 就地爆掉（毒雾里爆掉会顺势受伤）
       if (w.player.shieldT > 0 && rectHit(w.player.box, this.strandRect(st))) {
@@ -2185,6 +2190,8 @@ export class PitcherElevator extends MoverPlatform {
       this.homeKey = this.endRoom;
       this.handedOff = true;
       this.off = { x: this.endOff.x - this.endShift.x, y: this.endOff.y - this.endShift.y };
+      // 持久恢复=静止停在远端：不许立刻载人/发车（玩家可能出生在笼口位置），走出笼身才重新武装
+      this.awaitExit = true;
     }
   }
   /** 笼口（ boarding 判定/乘客锁定点）。 */

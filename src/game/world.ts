@@ -138,7 +138,8 @@ export class World {
   /** 传送选花模式：地图面板打开，WASD 自由移动光标，压住存档花才能确认转移。 */
   travelMode = false;
   private travelCursor: { x: number; y: number } | null = null; // 全局地图上的瓦片坐标
-  private travelRepeat = 0; // 光标按住连发的延迟/间隔计时
+  private travelRepeat = 0;
+  /** 吸附冷却：吸到存档花后短暂不再吸附，玩家可以继续把光标移开 */ // 光标按住连发的延迟/间隔计时
   private travelArmed = false; // 连发保险：开传送的那一下方向键松开前不许连发（否则开菜单即挪一格）
   private travelPanTX = 0; // 视野跟随的 pan 目标（实际 pan 每帧向它插值，贴边才滚动）
   private travelPanTY = 0;
@@ -290,6 +291,7 @@ export class World {
       this.parkedStalk = { stalk: this.beanStalk, roomKey: fromKey, timer: BEAN_PARK_TIME };
     }
     this.beanStalk = null;
+    this.flags.add(`seen:${key}`); // 地图迷雾：到过的房间才上地图（随 flags 自动入存档）
     this.mapDirty = true; // 新到访的房间要烙进全局地图
     const entities: Entity[] = [];
     (def.objects ?? []).forEach((o: ObjDef, i: number) => {
@@ -1173,7 +1175,13 @@ export class World {
   private cursorSavepoint() {
     const c = this.travelCursor;
     if (!c) return undefined;
-    return this.travelList.find((t) => t.mx === c.x && t.my === c.y);
+    // 精确命中优先；否则取 1.5 格内最近的花（光标不需要精确到像素点）
+    return (
+      this.travelList.find((t) => t.mx === c.x && t.my === c.y) ??
+      this.travelList
+        .filter((t) => Math.hypot(t.mx - c.x, t.my - c.y) <= 1.5)
+        .sort((a, b) => Math.hypot(a.mx - c.x, a.my - c.y) - Math.hypot(b.mx - c.x, b.my - c.y))[0]
+    );
   }
 
   /** 地图上选存档花：WASD 逐格移动光标，压住存档花后 J 确认黑场直达，Esc/Tab/K 取消。 */
@@ -1208,14 +1216,31 @@ export class World {
         audio.switchClick();
       }
     }
+    // 吸附：光标**停住**时（无方向输入）落在存档花附近（≤2.5 格）→ 吸到花上。
+    // 移动中绝不吸附——按住方向就能离开，不会"钉死"在花上；松手停稳才归位。
+    if (dirX === 0 && dirY === 0) {
+      let best: { mx: number; my: number } | null = null;
+      let bestD = 2.5;
+      for (const t of this.travelList) {
+        const d = Math.hypot(t.mx - this.travelCursor.x, t.my - this.travelCursor.y);
+        if (d > 0.01 && d <= bestD) {
+          bestD = d;
+          best = t;
+        }
+      }
+      if (best) {
+        this.travelCursor.x = best.mx;
+        this.travelCursor.y = best.my;
+      }
+    }
     // ---- 视野跟随：光标贴到视野内侧舒适带边缘才连续滚动（pan 平滑插值，不瞬跳、不强制居中）----
     const z = this.mapZoom;
     const baseX = (this.cx - this.mapMinCx + 0.5) * 32;
     const baseY = (this.cy - this.mapMinCy + 0.5) * 18;
     const screenX = (this.travelCursor.x - (baseX + this.mapPanX)) * z + ROOM_W / 2;
     const screenY = (this.travelCursor.y - (baseY + this.mapPanY)) * z + ROOM_H / 2;
-    const bandX0 = 56, bandX1 = ROOM_W - 56;
-    const bandY0 = 40, bandY1 = ROOM_H - 40;
+    const bandX0 = 48, bandX1 = ROOM_W - 48;
+    const bandY0 = 32, bandY1 = ROOM_H - 32;
     if (screenX > bandX1) this.travelPanTX -= (screenX - bandX1) / z;
     if (screenX < bandX0) this.travelPanTX -= (screenX - bandX0) / z;
     if (screenY > bandY1) this.travelPanTY -= (screenY - bandY1) / z;
@@ -1403,11 +1428,11 @@ export class World {
       if (ls.length) {
         for (const l of ls) lights.push({ x: l.x + ox, y: l.y + oy, r: l.r, tint: l.tint, strength: l.strength });
       } else {
-        // 基础微光：所有物件都有一点存在感（强度取材质自发光，最低 0.3）——
-        // 无光源、角色不在旁时物件仍是可辨认的亮剪影（用户反馈）
+        // 基础微光：仅剪影级存在感（微光=发光的一种，物件不该"发光"——鲜亮交给材质色彩）。
+        // 强度取材质自发光但压低下限；真正的发光只有光源类（glowStrength 0.75+）
         const m = mat(e.matKey ?? "");
-        const gs = Math.max(0.3, m.glowStrength);
-        lights.push({ x: e.x + ox, y: e.y + oy, r: 10 + 26 * gs, tint: m.glow, strength: gs * 0.9 });
+        const gs = Math.min(m.glowStrength, 0.2);
+        lights.push({ x: e.x + ox, y: e.y + oy, r: 6 + 14 * gs, tint: m.glow, strength: gs * 0.5 });
       }
     }
     for (const l of decor.lights) lights.push({ x: l.x + ox, y: l.y + oy, r: l.r, tint: l.tint ?? pal.glow });
@@ -1430,7 +1455,7 @@ export class World {
     const sd = this.debugSceneDark;
     // 场景底暗度 = 基础可见度 + 深度加成 + 调参。基础项压低：即使无光源、角色不在旁，
     // 场景物件也保持可辨认的剪影（用户反馈"几乎都看不见"）——光仍明显更亮，黑暗仍有层次。
-    const dark = 0.46 + GLOBAL_LIGHT_DEPTH * 0.10 + sd * 0.24;
+    const dark = 0.60 + GLOBAL_LIGHT_DEPTH * 0.10 + sd * 0.22;
     this.lightPass.render(ctx, this.camX, this.camY, `rgba(${lightPal.dark}, ${dark.toFixed(3)})`, lights);
     // 自发光点缀（发光苔藓/萤火虫/蜡烛/晶石/吊灯）：叠在黑暗之上，阴翳里也读得到生机
     decor.drawGlowScene(ctx, this.time);
