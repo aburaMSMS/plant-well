@@ -1431,13 +1431,7 @@ export class World {
     // 场景底暗度 = 基础可见度 + 深度加成 + 调参。基础项压低：即使无光源、角色不在旁，
     // 场景物件也保持可辨认的剪影（用户反馈"几乎都看不见"）——光仍明显更亮，黑暗仍有层次。
     const dark = 0.46 + GLOBAL_LIGHT_DEPTH * 0.10 + sd * 0.24;
-    // 真光源遮挡：实心瓦片挡光；房间边界外一律算实心（光不穿房）。玩家自己不挡光。
-    this.lightPass.render(ctx, this.camX, this.camY, `rgba(${lightPal.dark}, ${dark.toFixed(3)})`, lights, (x, y) => {
-      const lx = x - this.cx * ROOM_W;
-      const ly = y - this.cy * ROOM_H;
-      if (lx < 0 || ly < 0 || lx >= ROOM_W || ly >= ROOM_H) return true; // 邻房边界=墙
-      return this.room.tiles.solidAtPx(lx, ly);
-    });
+    this.lightPass.render(ctx, this.camX, this.camY, `rgba(${lightPal.dark}, ${dark.toFixed(3)})`, lights);
     // 自发光点缀（发光苔藓/萤火虫/蜡烛/晶石/吊灯）：叠在黑暗之上，阴翳里也读得到生机
     decor.drawGlowScene(ctx, this.time);
     decor.drawFog(ctx, this.time, GLOBAL_LIGHT_DEPTH);
