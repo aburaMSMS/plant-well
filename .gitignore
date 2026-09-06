@@ -8,3 +8,4 @@ node_modules/
 tmp-*.json
 tmp-*.png
 src/assets/music/*.wav
+.deploy.log
