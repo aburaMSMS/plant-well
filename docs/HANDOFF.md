@@ -1,6 +1,47 @@
 # HANDOFF — Plant Well 项目交接（compact 后从这里继续）
 
-> 最后更新：2026-09-05（第九次刷新：§卅 **跨房电梯真正修复**——第廿六批的 handoff 阈值/坐标系两处错误导致跨房乘坐时视角滞留、到站被放去入口、电梯消失，已按"分段目标+完全越界检测"重写并新增 16 项定向探针；§廿九 **地图数据 JSON 化**——一图一个 `src/data/maps/<id>.json` + `gameMap.json` 游戏图指针 + maps.ts 只剩类型与派生索引，保存通道按文件粒度并支持删图；§廿七 多地图系统 / §廿八 lens-0=上下限随机+顶栏排版；§廿五 上线前全面审查 + §廿六 用户八项需求）。本文档是会话压缩后的完整对接锚点：当前状态、架构地图、机制数值、测试基础设施、已知坑与未尽事项。
+> **工作规矩（用户原话，长期有效）**：用户说"commit"= **commit + push 都要执行**（push 会经 pre-push hook 自动部署到 Cloudflare Pages）；只提交不推是不完整的。
+
+> 最后更新：2026-09-07（**第四十二批：换房算法重构为“连续世界”模型**（用户定案：换房=切视角，不是过门）——①中心点越界即触发（无门槛无吸附）；②黑透瞬间只做**坐标按房差平移**（动量/抛物线/骑泡相对关系原样延续），删掉入口吸附+resolveEmbed 搬迁+fromBelow 那一整套；③黑透前折返自动取消换房；④fade 带 swap/travel 双语义（传送目标写死不随位置）；⑤**电梯出舱赠跳**（player.exitJump：吐出置位、悬空可用一次、落地作废）；⑥**编辑器选点设出生点**（选点设出生点按钮→画布点一格=出生点，Esc 取消）。⑦**探针独立测试图 T90**：`scripts/testmap.mjs` 程序化生成+withTestMap 自动写/切/恢复（崩溃残留自愈），cdp-verify-fix 全部改挂 T90 无头跑，与 M01 彻底解耦（用户改 M01 不再冲突）。验证：tsc 干净；cdp-verify-fix **14/14**（水平连续/缝合挡墙/上升连续不瞬移/电梯跨房+赠跳）；editor-tools 9/9；multimap 23/23；softlock/bubble-cross ✓。⚠ 探针经验：headless 下 CDP keyboard 事件不可靠（静默丢失），按键一律走 `__pw.input.queue.push` 或页内合成 KeyboardEvent；节流帧会伪造状态——断言前等 `w.time` 前进；debugGoto 的 spawnAt 会覆盖紧随其后的坐标设置——先 goto 落稳再改。第四十批（房界缝合+落点择址，详见下文）仍是本模型的地基。)
+
+## ⚠ 第四十三批（2026-09-07）：全面审查 + 一致性清理
+
+1. **命名统一**：`homeKey/originKey`→`homeId/originId`（entities+world，字段持有的是房间 id）；编辑器 `placeCtx` 砍掉冗余 `roomKey`（只留 `roomId`）、`bindPick/dragObj/mouseTile/toWorldTile/tryBind/deleteMulti` 的 key→roomId；`travelList` 键名改 `flagKey`；`nearestLanding` 用 `ROOM_ROWS`。
+2. **存档防护**：`readSave` 校验 roomId 有效/坐标为数字，旧档（room 数组）或坏档→当无档处理；spPos/checkpoint 里指向不存在房间的条目剔除（传送地图不再出现死光标）。
+3. **validate-rooms.ts 重写**：适配 Rxx（id 键/按图遍历/出生点按 id）；删洞口配对规则（错位洞合法）；新增网格占位重复检查；通关性检查（源种连续/道具齐）限定 ★游戏地图。M01 现状：0 错 3 警告（2 条藤尖插岩视觉穿帮 + R05 一块空 controls 压力板）。
+4. 已知红灯（数据漂移，非代码回归）：release-audit 5 败（R04 存档花被挪走/K25B6Y 竖直断言看 off.x）、feature-batch（R12 右缘洞口换位）、whip-pull（尖刺坑+door:13 没了）、elevator-cross（UYDJ26 已删，待改挂 TSTELV/FQ84CK）——全部是旧 fixtures 撞上用户改图，已用 stash 对照排除代码回归。**待办**：这批老探针迁到 T90 或按新地图重摆。
+
+## ⚠ 第四十二批（2026-09-07）：连续世界换房模型（架构定案）
+
+**用户需求原文要点**：角色状态（电梯中/泡泡上/无绑定）跨房保持；以中心点为判断对象；room 与 room 之间不完全独立——下面的房往上面的房跳台阶必须等同于房内跳台阶；切视角而非世界重启。
+**实现**（world.ts）：
+- `checkTransitions`：中心点 `p.x/p.y` 越出 [0,W]×[0,H] 即排队 `fade={swap:true}`（无 ±4 门槛）；黑透前折返（中心回房内）→ fade=null 取消；无邻房 → 钳回（双保险）。
+- `completeRoomSwap`：黑透时按**当刻**越界方向定目标（斜向两轴都越=斜邻房，不存在则取消）；`p.x += (from.x-to.x)*ROOM_W`（y 同理）纯平移；骑泡 rider 同平移并入新房实体表；`embeddedAt` 兜底（仅“被无视碰撞的状态带进岩壁”才触发 resolveEmbed 全房择址）。
+- `fade` 结构：`{t, phase, dur?, swap?, travel?{nid,nx,ny}}`——边界越界用 swap，存档花传送用 travel（目标写死）。update 的 fade 分支按语义分流。
+- `resolveEmbed` 回归单一职责：仅 embeddedAt 兜底（nearestLanding 全房分级扫描），fromBelow/groundBelow 已删。
+- **出舱赠跳**：player.exitJump（entities.ts 吐出处置 true；player.ts 跳跃条件 `coyote>0 || exitJump`，落地清零）。
+**编辑器**：选点设出生点（spawnPick 模式：armed 时画布点击=setSpawnRoom+setSpawnPos，Esc 取消）。
+**探针**：`scripts/testmap.mjs`（T90：R91 走廊+竖井+右开口、R92 对齐走廊+savepoint、R93 高腔体+底开口；电梯 TSTELV R91→R92）+ `cdp-verify-fix.mjs` 14 项。**测试纪律（用户明令）**：以后测试一律用 T90 这类专用图，不依赖 M01（用户会随时改 M01）。
+
+## ⚠ 第四十一批（2026-09-06）：房间标识全面 Rxx 化 + 五项体验需求
+
+1. **Rxx 统一标识（用户明令：所有 m,n 全部取代）**：`ROOMS` 以房间 id（Rxx）为键；新增 `ROOM_ID_BY_POS`（网格坐标→id，换房/邻接用）与 `ROOM_POS`（id→坐标，相机/世界偏移用）；删除 `ROOM_KEY_BY_ID`。世界持有 `roomId` 为唯一标识，`cx/cy` 降级为它的坐标投影。存档格式：`room:[m,n]`→`roomId:"R12"`，checkpoint/spPos 同改（**旧存档不兼容**，符合用户"不要兼容旧的"规矩）；flags（seen:/sp:）键变 Rxx。编辑器：`MapRec.rooms` 改 id 键 + `RoomRec` 增 x/y 字段、`idOrder` 取代 keyOrder、序列化/导入/校验/井图/下拉/状态栏全走 id；手输坐标建房输入框已删（点井图空位建房，id 自动分配 R01 起增加）。**负坐标审视结论**：房号全程字符串键+min 归一化+线性算术，负坐标安全（用户原假设排除）。
+2. **换房阈值收紧** ±6→±4（后被四十二批连续世界模型取代——现在中心点过界即触发）。
+3. **校验器删"洞口配对"规则**：错位洞口（右上阶梯跨房）是合法设计（用户明令）；边缘徽章三色：绿=贯通/灰=被邻房岩封（缝合后即墙）/红=无邻房会漏。
+4. **传送地图 pan 符号反转 bug**：跟随带修正量写反（越界越拉越远）→ 全部 `+=`；低倍缩放 pan=0 从不暴露、放大才见。
+5. **编辑器邻房操作不瞬移视角**：新增 `switchWorkRoom`（切工作房+井图高亮，镜头不动）；画笔/矩形/框选/拖物件用它，显式导航（下拉/翻房/点井图/建房）仍走 gotoRoom 居中。
+
+## ⚠ 第四十批（2026-09-06）：跨房"视角不跟"根因已修（CDP 实录定性）
+
+**用户症状**：从 (2,0)R12 走进手建新房（(3,0)R21 / (2,-1)R22），"角色明明已在另一个房间，视角还停在当前房间"。无头探针此前验证换房链路数学全对，一直无法复现——**因为这不是换房逻辑的错，是换房之后落点解算的错**。
+**CDP 实录因果链**（`.cdp-trace.round1.jsonl`，712+ 样本）：R22 底洞(px200-249) 与 R12 顶洞(px200-219) 错位 → 用户从 x≈232 下落 → 换房正常触发、视角正常切到 (2,0) → 但入口点 (231.79,7) 嵌在 R12 顶壁实心里 → `resolveEmbed` 四向扩张搜索**无边界钳制**且第一方向是正上 → 探到 y=-5 时探测点已全在房外，`Tiles.get` 越界一律返回 Air → 返回 (231.79,**-5**) → 人被钉在世界顶部房界外（trace 尾 2700+ 样本 py 冻结在 -4.01）→ 角色不可见、不能动，看起来就是"人在隔壁房、视角没换"。
+**修复（终版，四轮迭代，两支柱）**：
+①**房界缝合（核心）**：`solidAtPx`/`climbSolidAtPx` 对越界查询翻查邻房边缘瓦片（`seamCache` 按房键缓存 Tilemap，界内查询零开销）。旧物理只查本房——**房界对碰撞是空气**，邻房是岩也能跳穿边界钻进它的岩石/洞口，这是一切"视角不跟/掉回原房间/跳到错误位置"的总根源（用户最初怀疑负坐标，审视结论：房号全程字符串键+min 归一化+线性相机，负坐标安全）。缝合后：邻房是岩的地方房界就是墙（跳头撞线落回，"蓝圈起跳应落粉圈"成立），邻房开口才是通路；R22 竖井底 cols23-24 因 R12 顶行是岩而自然成为"站在缝上"的凹龛。
+②**resolveEmbed 分级择址**：嵌体（换房落进岩壁/电梯投进石壁）全房逐格扫，候选分级 0=原地可站（含站在缝上）/1=正下方有实心/2=贯通（罚 1e9 只作兜底），1 级罚 150px 等效距离；**fromBelow 防回坠**（从房底钻入 ny≥H-8 且脚下直通房底＝骑着来时的洞，攀爬越界无动量会永远掉回去）：钳 90px 找 0/1 级立足点拉上去，找不到（纯烟囱）保持原位动量自然延续，绝不长距离挪人。
+**验证**：`scripts/cdp-verify-fix.mjs`（节流鲁棒版）28 项——A：对齐列 col21 下坠贯通落 (2,0)、岩壁阴影列 col23 缝住站 (2,-1)；C1：R13→R12 物理上跳（爬楼路径）站稳 (2,0)；C2：R12→R22 上跳稳定收场；B：debugGoto 全 22 房（带一次重试吸收用户按键/节流抖动）。**CDP 测试坑**：Edge 窗口不在前台时 rAF 停摆（冻结帧/黑场卡 1s/悬空"稳定"帧）；用户可能在采样窗口里操作游戏——探针要 liveness 校验 + 重试，偶发单失败别当回归。
+**CDP 工作流**（可复用）：Edge `--remote-debugging-port=9223 --user-data-dir=<项目外目录>` 起窗（**档案不能放项目里**——vite watcher 会撞 Edge 锁住的 Cookies 文件 EBUSY 崩溃），`?debug=1` 暴露 `__pw`；`scripts/cdp-watch.mjs` 后台常驻采样（16ms：cx/cy/cam/player/fade/keys/帧节奏/visibility，房间·换场事件即时打 stdout）。内置浏览器（GameViewer WebView2）无调试口，附不上去，只能自起等效窗口。
+**注意**：R22(2,-1)/R21(3,0) 是用户手建的 0 物件房（无光源，全黑）；R12↔R22 洞口错位本身是数据问题，游戏侧已能优雅处理（落回洞内最近空位）。
+**已知红灯（非回归）**：`elevator-cross-probe` 现为 11过/10败——它整套断言建立在 UYDJ26（R12→R05 横向跨房）上，而用户已把 UYDJ26 删掉（当前图里电梯=PT7DJE/K25B6Y 同房 + FQ84CK 跨房 R15→R14 back=true 触发器 MDUWGX）。stash 对照实测：修复前后同为 11/10，纯数据漂移。**待办**：把探针改挂 FQ84CK（endShift.y=-180，vertical）恢复绿灯；未做前勿当回归处理。
 
 ## 一、项目是什么
 

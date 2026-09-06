@@ -372,8 +372,6 @@ export interface PlaceCtx {
   nextSeedId: number;
   /** 放置自定义物件时挂的 prop id */
   propId: string;
-  /** 放置目标房间键（"2,0"） */
-  roomKey: string;
   /** 放置目标房间的 id（"R05"）：location.room_id 写它 */
   roomId: string;
 }
@@ -381,7 +379,7 @@ export interface PlaceCtx {
 /** 新物件的默认字段：x/y 取放置格；可选字段留空（导出时省略）。 */
 export function defaultsFor(spec: ObjSpec, x: number, y: number, ctx: PlaceCtx): ObjRec {
   const o: ObjRec = { type: spec.type };
-  const rid = ctx.roomId || ctx.roomKey;
+  const rid = ctx.roomId;
   for (const f of spec.fields) {
     if (f.kind === "location") {
       // 起点=放置格；终点（end）缺省在起点右 3 格，可后续 🎯 点选或手填

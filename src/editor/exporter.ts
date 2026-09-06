@@ -5,12 +5,11 @@ import type { MapRec } from "./doc";
 
 /** 一张地图的 JSON 文件内容（编辑器保存、导入导出共用同一序列化，保证脏比较稳定）。 */
 export function serializeMap(m: MapRec): string {
-  const rooms = m.keyOrder
-    .map((k) => {
-      const r = m.rooms[k];
+  const rooms = m.idOrder
+    .map((rid) => {
+      const r = m.rooms[rid];
       if (!r) return null;
-      const [x, y] = k.split(",").map(Number);
-      const out: Record<string, unknown> = { id: r.id, x, y, map: r.map, objects: r.objects };
+      const out: Record<string, unknown> = { id: r.id, x: r.x, y: r.y, map: r.map, objects: r.objects };
       if (r.lights?.length) out.lights = r.lights;
       if (r.moss) out.moss = r.moss;
       return out;

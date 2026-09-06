@@ -27,7 +27,7 @@ ok("建筑类含岩壁+空气", buildChips.includes("#") && buildChips.includes(
 // 2. 空气画笔：选空气 → 涂瓦片变空气（原橡皮职责）
 const solidBefore = await page.evaluate(() => {
   const d = window.__pwEditor.doc;
-  const r = d.rooms["2,0"];
+  const r = Object.values(d.rooms).find((rr) => rr.x === 2 && rr.y === 0);
   return { solid: r.map[14][6] === "#", row: r.map[14] };
 });
 await page.evaluate(() => {
@@ -43,12 +43,12 @@ ok("选中空气材料（状态栏显示 空气）", selTile, await page.evaluat
 // 3. 矩形填充（空气）：直接对 doc 调 fillRect 路径——通过真实 UI 拖拽在 (2,0) 内
 //    先切视野到 2,0（默认已在），拖拽矩形 (4,3)-(9,6) 填空气
 const solidCount = async () => page.evaluate(() => {
-  const r = window.__pwEditor.doc.rooms["2,0"];
+  const r = Object.values(window.__pwEditor.doc.rooms).find((rr) => rr.x === 2 && rr.y === 0);
   let n = 0;
   for (let y = 13; y <= 15; y++) for (let x = 8; x <= 10; x++) if (r.map[y][x] === "#") n++;
   return n;
 });
-await page.evaluate(() => window.__pwEditor.doc.rooms["2,0"]); // warm
+await page.evaluate(() => Object.values(window.__pwEditor.doc.rooms).find((rr) => rr.x === 2 && rr.y === 0)); // warm
 // 计算画布上 (4,3) 格的屏幕坐标：用 renderer 不可见，改为发 pointer 事件前先复位视图（Ctrl+HOME 不存在）——
 // 直接用页面坐标：从 view 中心反推不可靠；改为直接驱动内部函数路径：pointer 事件需要相机。
 // 简化：调用与 pointerup 相同的 fillRect 效果——通过拖拽事件（marquee 之外的 rect 工具），
@@ -103,7 +103,7 @@ await page.waitForTimeout(150);
 // 4. 框选：在 2,0 放两个装饰物件 → 选择工具框选 → 批量删除
 await page.evaluate(() => {
   const d = window.__pwEditor.doc;
-  d.rooms["2,0"].objects.push(
+  Object.values(d.rooms).find((rr) => rr.x === 2 && rr.y === 0).objects.push(
     { type: "flower", location: { room_id: "R12", x: 12, y: 10 } },
     { type: "flower", location: { room_id: "R12", x: 15, y: 12 } },
   );
@@ -126,14 +126,14 @@ ok("框选拖拽产生多选批量卡片", mar.head.includes("框选") && mar.mu
 await page.keyboard.press("Delete");
 await page.waitForTimeout(200);
 const afterDel = await page.evaluate(() => {
-  const os = window.__pwEditor.doc.rooms["2,0"].objects;
+  const os = Object.values(window.__pwEditor.doc.rooms).find((rr) => rr.x === 2 && rr.y === 0).objects;
   return os.filter((o) => o.type === "flower").length;
 });
 ok("Del 批量删除（flower 全清）", afterDel === 0, `left=${afterDel}`);
 // 撤销批量删除 → 两个 flower 都回来（整体撤销）
 await page.keyboard.press("Control+z");
 await page.waitForTimeout(150);
-const undone = await page.evaluate(() => window.__pwEditor.doc.rooms["2,0"].objects.filter((o) => o.type === "flower").length);
+const undone = await page.evaluate(() => Object.values(window.__pwEditor.doc.rooms).find((rr) => rr.x === 2 && rr.y === 0).objects.filter((o) => o.type === "flower").length);
 ok("批量删除可整体撤销（2 个都回来）", undone === 2, `flowers=${undone}`);
 
 ok("无页面 JS 错误", errors.length === 0, errors.join(" | ").slice(0, 300));

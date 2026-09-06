@@ -787,6 +787,7 @@
               </div>
               <p class="hint" style="margin:4px 0 0" id="mapMeta"></p>
               <div class="row">
+                <button id="pickSpawn" title="在房间画布上点一格，出生点落到那">选点设出生点</button>
                 <button id="mapSetSpawn" title="把出生点移到当前编辑的房间">出生点→本房</button>
                 <label class="dim" style="display:flex;gap:4px;align-items:center">x<input id="spawnX" type="number" style="width:56px" min="0" max="319" title="出生点像素 x（房内）"></label>
                 <label class="dim" style="display:flex;gap:4px;align-items:center">y<input id="spawnY" type="number" style="width:56px" min="0" max="179" title="出生点像素 y（房内）"></label>
@@ -798,11 +799,9 @@
             </section>
             <section>
               <h3>井结构</h3>
-              <p class="hint" style="margin:0 0 8px">左下角井图点选切房、点空位确认后建房（右键拖动平移）。也可用坐标新建。</p>
+              <p class="hint" style="margin:0 0 8px">左下角井图点选切房、点空位确认后建房（右键拖动平移）。房间 id（Rxx）自动分配。</p>
               <div class="row" style="margin-top:0">
-                <input id="newRoomKey" placeholder="col,row" />
-                <button id="addRoom">新建</button>
-                <button id="delRoom" class="danger">删除</button>
+                <button id="delRoom" class="danger">删除当前房</button>
               </div>
             </section>
             <section>

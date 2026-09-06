@@ -48,6 +48,8 @@ export class Player {
   // 计时器（秒）
   coyote = 0;
   jumpBuf = 0;
+  /** 电梯出舱赠跳：出笼后的一次空中免费跳（用掉即消；落地作废）。 */
+  exitJump = false;
   squash = 0; // 落地/起跳挤压，>0 播放中
   invuln = 0;
   deadT = 0;
@@ -175,10 +177,13 @@ export class Player {
     if (input.pressed("jump")) this.jumpBuf = JUMP_BUFFER;
     this.jumpBuf = Math.max(0, this.jumpBuf - dt);
     this.coyote = this.grounded ? COYOTE_TIME : Math.max(0, this.coyote - dt);
-    if (this.jumpBuf > 0 && this.coyote > 0) {
+    // 电梯出舱赠跳：出笼一次空中的免费跳（用过即没；落地作废），让笼口悬空也能起跳
+    if (this.grounded) this.exitJump = false;
+    if (this.jumpBuf > 0 && (this.coyote > 0 || this.exitJump)) {
       this.vy = -JUMP_VEL;
       this.jumpBuf = 0;
       this.coyote = 0;
+      this.exitJump = false;
       this.grounded = false;
       this.squash = -0.5; // 负值 = 拉伸
       this.jumpCutting = true;

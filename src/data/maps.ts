@@ -126,14 +126,20 @@ export const GAME_MAP: MapDef = MAP_LIST.find((m) => m.id === GAME_MAP_ID) ?? MA
 /** 当前游戏地图的房间列表（数据真身在 maps/*.json，这里是游戏侧的便捷别名）。 */
 export const ROOM_LIST = GAME_MAP.rooms;
 
-// 网格键（"x,y"）→ 房间的派生索引：游戏内部寻路/加载用它，数据维护请改 maps/*.json。
+// 房间 id（"R12"）→ 房间定义：游戏与编辑器**统一且唯一**的房间标识（v40 起全面取代网格键 "m,n"）。
+// 房间的网格坐标是 def.x/def.y 数据，只用于邻接换房与相机/世界偏移换算。
 export const ROOMS: Record<string, RoomDef> = Object.fromEntries(
-  ROOM_LIST.map((r) => [`${r.x},${r.y}`, r]),
+  ROOM_LIST.map((r) => [r.id, r]),
 );
 
-/** 房间 id（"R01"）→ 网格键（"m,n"）：游戏内部寻路/加载仍用网格键，物件坐标用 id。 */
-export const ROOM_KEY_BY_ID: Record<string, string> = Object.fromEntries(
-  Object.entries(ROOMS).map(([k, def]) => [def.id, k]),
+/** 网格坐标（"m,n"）→ 房间 id：按坐标找邻房时用（换房/邻接判定）。 */
+export const ROOM_ID_BY_POS: Record<string, string> = Object.fromEntries(
+  ROOM_LIST.map((r) => [`${r.x},${r.y}`, r.id]),
+);
+
+/** 房间 id → 网格坐标：世界偏移/小地图换算用（等价于 ROOMS[id].x/.y 的便捷表）。 */
+export const ROOM_POS: Record<string, { x: number; y: number }> = Object.fromEntries(
+  ROOM_LIST.map((r) => [r.id, { x: r.x, y: r.y }]),
 );
 
 /** 被控物件的 id → 种类：触发方（开关/压力板）据此决定触发方式——
@@ -150,11 +156,11 @@ export const BINDING_KIND: Record<string, "door" | "mover"> = (() => {
   return out;
 })();
 
-/** 出生点：spawn.room 的房间 id 已换算成网格键（世界代码直接消费）。 */
+/** 出生点：spawn.room 即房间 id（Rxx），世界代码直接消费。 */
 export const SPAWN = (() => {
-  const key = ROOM_KEY_BY_ID[GAME_MAP.spawn.room];
-  if (!key) throw new Error(`地图 ${GAME_MAP.id} 的出生点房间 "${GAME_MAP.spawn.room}" 不存在`);
-  return { room: key, x: GAME_MAP.spawn.x, y: GAME_MAP.spawn.y };
+  const id = GAME_MAP.spawn.room;
+  if (!ROOMS[id]) throw new Error(`地图 ${GAME_MAP.id} 的出生点房间 "${id}" 不存在`);
+  return { room: id, x: GAME_MAP.spawn.x, y: GAME_MAP.spawn.y };
 })();
 
 /** 源种总数 = 本图源种最大编号（HUD 槽位数）。 */

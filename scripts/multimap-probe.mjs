@@ -41,14 +41,14 @@ try {
     const d = window.__pwEditor.doc;
     const m = d.curMap();
     return {
-      rooms: m.keyOrder.length,
-      first: m.keyOrder[0],
-      roomId: m.rooms["0,0"]?.id ?? "",
+      rooms: m.idOrder.length,
+      first: m.idOrder[0],
+      firstPos: m.rooms[m.idOrder[0]] ? m.rooms[m.idOrder[0]].x + "," + m.rooms[m.idOrder[0]].y : "?",
       spawnRoom: m.spawn.room,
       key: window.__pwEditor.state.key,
     };
   });
-  ok("新图起始房+出生点+工作房就位", nm.rooms === 1 && nm.first === "0,0" && nm.spawnRoom === nm.roomId && nm.key === "0,0", JSON.stringify(nm));
+  ok("新图起始房@0,0+出生点+工作房就位", nm.rooms === 1 && nm.firstPos === "0,0" && nm.spawnRoom === nm.first && nm.key === nm.first, JSON.stringify(nm));
 
   // 3. 改名
   await page.evaluate(() => {
@@ -69,7 +69,7 @@ try {
   ok("导入后 3 张图、切到 M03（id 自动顺延）", st.maps.length === 3 && st.map === "M03", JSON.stringify(st));
   const imp = await page.evaluate(() => {
     const m = window.__pwEditor.doc.curMap();
-    return { name: m.name, rooms: m.keyOrder.length, objects: m.rooms["0,0"]?.objects.length ?? -1 };
+    return { name: m.name, rooms: m.idOrder.length, objects: Object.values(m.rooms).find((rr) => rr.x === 0 && rr.y === 0)?.objects.length ?? -1 };
   });
   ok("导入图内容一致（名/房/空物件）", imp.name === "测试图" && imp.rooms === 1 && imp.objects === 0, JSON.stringify(imp));
 
@@ -81,7 +81,8 @@ try {
   });
   await page.waitForTimeout(200);
   st = await page.evaluate(() => window.__pwEditor.state);
-  ok("切回 M01 且工作房=出生点房 2,0", st.map === "M01" && st.key === "2,0", JSON.stringify(st));
+  const spawnId0 = await page.evaluate(() => window.__pwEditor.doc.curMap().spawn.room);
+  ok("切回 M01 且工作房=出生点房 " + spawnId0, st.map === "M01" && st.key === spawnId0, JSON.stringify(st));
 
   // 6. 小地图右键拖动：M02 拼出 8 房竖列（192px > 视口 168px）才拖得动
   await page.evaluate(() => {
@@ -92,7 +93,7 @@ try {
   await page.waitForTimeout(150);
   await page.evaluate(() => {
     const d = window.__pwEditor.doc;
-    for (let i = 1; i <= 7; i++) d.addRoom(`0,${i}`);
+    for (let i = 1; i <= 7; i++) d.addRoom(0, i);
   });
   await page.waitForTimeout(250);
   const mm0 = await page.evaluate(() => window.__pwEditor.state.mm);
@@ -105,37 +106,67 @@ try {
   await page.waitForTimeout(150);
   const mm1 = await page.evaluate(() => window.__pwEditor.state.mm);
   ok("小地图右键拖动平移（视口偏移变化）", mm1.y > mm0.y, JSON.stringify({ mm0, mm1 }));
-  // 左键：点已有房=切房；点空位=弹确认创建（对话框接受才建，取消不建）
-  // M02 此刻是 (0,0..0,7) 竖列；井图原点 = 包围盒扩 4 格 → min(-4,-4)；拖动后 mm=(0,90)
-  const cellCss = (c, r) => ({
-    x: mapBox.x + (c + 4) * 38 - mm1.x + 19,
-    y: mapBox.y + (r + 4) * 24 - mm1.y + 12,
+  // 左键：点已有房=切房；点空位=弹确认创建（对话框接受才建，取消不建）。
+  // M02 此刻是 (0,0..0,7) 竖列；井图原点 = 包围盒扩 4 格 → min(-4,-4)。
+  // 拖动后视口在哪由 mm 决定——按当前 mm 挑"画布内可见"的格子来点，不写死格名。
+  const CW = 38, CH = 24, MG = 4;
+  const cellPt = (mm, c, r) => ({
+    x: mapBox.x + (c + MG) * CW - mm.x + CW / 2,
+    y: mapBox.y + (r + MG) * CH - mm.y + CH / 2,
   });
-  // 点已有房 (0,2)：切过去
-  const cExist = cellCss(0, 2);
-  await page.mouse.click(cExist.x, cExist.y);
-  await page.waitForTimeout(150);
-  const keyExist = await page.evaluate(() => window.__pwEditor.state.key);
-  ok("小地图左键点已有房=切房", keyExist === "0,2", keyExist);
-  // 点空位 (1,3)：确认对话框接受 → 创建并切过去（mm 用切房后现读值，mmEnsureVisible 可能已重新居中）
-  const mm2 = await page.evaluate(() => window.__pwEditor.state.mm);
-  const cellCss2 = (c, r) => ({ x: mapBox.x + (c + 4) * 38 - mm2.x + 19, y: mapBox.y + (r + 4) * 24 - mm2.y + 12 });
-  page.once("dialog", (d) => d.accept());
-  const cEmpty = cellCss2(1, 3);
-  await page.mouse.click(cEmpty.x, cEmpty.y);
-  await page.waitForTimeout(250);
-  const created = await page.evaluate(() => ({
-    has: !!window.__pwEditor.doc.rooms["1,3"],
-    key: window.__pwEditor.state.key,
-  }));
-  ok("小地图点空位+确认 → 创建新房间并切过去", created.has && created.key === "1,3", JSON.stringify(created));
-  // 点空位 (2,3)：对话框取消 → 不创建
+  const visibleCell = async (c, r) => {
+    const mm = await page.evaluate(() => window.__pwEditor.state.mm);
+    const cv = await (await page.$("#roomMap")).boundingBox();
+    const p = cellPt(mm, c, r);
+    return p.x >= cv.x + 4 && p.x <= cv.x + cv.width - 4 && p.y >= cv.y + 4 && p.y <= cv.y + cv.height - 4 ? p : null;
+  };
+  // 点已有房：找一个当前视口内可见的已有房格（col 0, rows 0..7）
+  let clicked = false;
+  for (const r of [5, 4, 6, 3, 2, 1]) {
+    const p = await visibleCell(0, r);
+    if (!p) continue;
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(200);
+    const keyNow = await page.evaluate(() => window.__pwEditor.state.key);
+    const ridNow = await page.evaluate((row) => {
+      const rr = Object.values(window.__pwEditor.doc.rooms).find((r2) => r2.x === 0 && r2.y === row);
+      return rr?.id ?? "";
+    }, r);
+    if (keyNow === ridNow && ridNow) {
+      ok(`小地图左键点已有房 (0,${r})=切房到 ${ridNow}`, true);
+      clicked = true;
+      break;
+    }
+  }
+  ok("小地图左键点已有房=切房", clicked, "视口内没找到可点的已有房");
+  // 点空位：确认对话框接受 → 创建并切过去（位置任选视口内空格，col 1 全空）
+  let createdAt = null;
+  for (const r of [5, 4, 6, 3]) {
+    const p = await visibleCell(1, r);
+    if (!p) continue;
+    page.once("dialog", (d) => d.accept());
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(300);
+    createdAt = await page.evaluate((row) => {
+      const rr = Object.values(window.__pwEditor.doc.rooms).find((r2) => r2.x === 1 && r2.y === row);
+      return rr ? { id: rr.id, x: rr.x, y: rr.y, key: window.__pwEditor.state.key } : null;
+    }, r);
+    if (createdAt) break;
+  }
+  ok("小地图点空位+确认 → 创建新房间并切过去", createdAt && createdAt.key === createdAt.id, JSON.stringify(createdAt));
+  // 再点一个空位：对话框取消 → 不创建
   page.once("dialog", (d) => d.dismiss());
-  const cEmpty2 = cellCss2(2, 3);
-  await page.mouse.click(cEmpty2.x, cEmpty2.y);
-  await page.waitForTimeout(250);
-  const notCreated = await page.evaluate(() => !!window.__pwEditor.doc.rooms["2,3"]);
-  ok("取消确认 → 不创建", !notCreated, `2,2 exists=${notCreated}`);
+  let dismissAt = null;
+  for (const r of [6, 3, 4]) {
+    const p = await visibleCell(2, r);
+    if (!p) continue;
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(300);
+    dismissAt = await page.evaluate(([rr]) => !!Object.values(window.__pwEditor.doc.rooms).some((r2) => r2.x === 2 && r2.y === rr), [r]);
+    if (dismissAt === false) { ok(`取消确认 → 不创建 (2,${r})`, true); break; }
+  }
+  if (dismissAt === null) ok("取消确认 → 不创建", false, "视口内没找到空位");
+  else if (dismissAt === true) ok("取消确认 → 不创建", false, "对话框取消后仍创建了房间");
 
   // 7. ★ 设为游戏图 + 保存 → GAME_MAP_ID 落盘
   await page.click("#mapGame");
@@ -155,7 +186,8 @@ try {
   // 保存触发 maps.ts 变更冒泡 → 编辑器全页刷新，等它重建完再校验
   await page.waitForFunction(() => !!window.__pwEditor, null, { timeout: 15000 });
   await page.waitForTimeout(600);
-  const stIssues = await page.evaluate(() => window.__pwEditor.doc.validate().filter((i) => i.level === "error").length);
+  const stIssuesAll = await page.evaluate(() => window.__pwEditor.doc.validate().filter((i) => i.level === "error"));
+  const stIssues = stIssuesAll.length;
   ok("新图数据校验 0 错", stIssues === 0, `errors=${stIssues}`);
 
   // 8. 游戏页跟着切图：新图只有一间房，出生点 160,90（过开机门进入 game 态才有位置）

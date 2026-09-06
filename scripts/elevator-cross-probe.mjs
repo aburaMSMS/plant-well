@@ -19,7 +19,7 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 
 async function boot() {
-  await page.goto(`${BASE}/?debug=1&room=2,0`);
+  await page.goto(`${BASE}/?debug=1&room=R12`);
   await page.waitForFunction(() => !!window.__pw, null, { timeout: 20000 });
   await page.keyboard.press("Enter");
   await page.waitForTimeout(1100);
@@ -128,7 +128,7 @@ async function scenario() {
   ok("玩家原地不动：房间还是 R05、坐标分毫未移", s4.cx === 1 && Math.abs(s4.px - pxStood) <= 2, `cx=${s4.cx} px=${s4.px}（原 ${pxStood}）`);
 
   // 5. 玩家走回出发房：笼子已随 loadRoom 归位（数据原件让位给它）
-  await page.evaluate(() => window.__pw.world.debugGoto("2,0"));
+  await page.evaluate(() => window.__pw.world.debugGoto("R12"));
   await page.waitForTimeout(400);
   const s5 = await snap();
   ok("玩家回出发房：笼子已归位且停回原格", s5.cx === 2 && s5.inRoom && s5.end === 0 && Math.abs(s5.x - el0.rectX) <= 1, JSON.stringify(s5));
@@ -138,14 +138,14 @@ async function scenario() {
     const w = window.__pw.world;
     w.flags.add("lift:UYDJ26"); // 模拟"曾送到远端"的持久化位
   });
-  await page.evaluate(() => window.__pw.world.debugGoto("2,0"));
+  await page.evaluate(() => window.__pw.world.debugGoto("R12"));
   await page.waitForTimeout(400);
   const s6 = await snap();
   ok("persist：出发房原件让位（重建不再出现 origin 状态笼）", s6.cx === 2 && !s6.inRoom && s6.det === 1, JSON.stringify(s6));
   ok("persist：detached 笼停在远端（end=1）", s6.end === 1 && Math.abs(s6.x - restX) <= 1, JSON.stringify(s6));
 
   // 7. 玩家回终点房：真身物化，可再乘坐；乘回去后 flag 清除、笼停回原格
-  await page.evaluate(() => window.__pw.world.debugGoto("1,0"));
+  await page.evaluate(() => window.__pw.world.debugGoto("R05"));
   await page.waitForTimeout(400);
   const s7 = await snap();
   ok("persist：终点房物化真身（end=1 停远端）", s7.cx === 1 && s7.inRoom && s7.end === 1 && Math.abs(s7.x - restX) <= 1, JSON.stringify(s7));

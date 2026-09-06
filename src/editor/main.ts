@@ -51,7 +51,7 @@ const ROOM_KEY_STORE = "plantwell.editor.room";
 
 function spawnRoomKey(): string {
   const sp = doc.spawn();
-  return doc.rooms[sp.room] ? sp.room : doc.keyOrder[0] ?? "";
+  return doc.rooms[sp.room] ? sp.room : doc.idOrder[0] ?? "";
 }
 
 function bootRoom(): string {
@@ -70,6 +70,8 @@ let brushTile = "#";
 let placeType = "tree";
 // 🎯 选点模式：为哪个坐标字段（location/end）选点 + 目标物件所在房/序号；点房间画布落点、点小地图切房、Esc 取消
 let pickField: string | null = null;
+/** 📍 出生点选点模式：armed 时下一次房间画布点击 = 出生点落点（房+像素一次定）。 */
+let spawnPick = false;
 let pickIndex: number | null = null;
 let pickHome: string | null = null;
 let placePropId = firstPropId(); // 放置「自定义物件」时挂的 id
@@ -88,14 +90,14 @@ let paintValue: string | null = null;
 let paintPre: string | null = null;
 let lastPaint: { x: number; y: number } | null = null;
 let rectAnchor: { x: number; y: number } | null = null;
-let dragObj: { key: string; index: number; startX: number; startY: number; ox: number; oy: number; pre: string } | null = null;
+let dragObj: { roomId: string; index: number; startX: number; startY: number; ox: number; oy: number; pre: string } | null = null;
 // 画布平移（右键/中键拖动）：panState 非空=正在拖
 let panState: { x: number; y: number; camX: number; camY: number } | null = null;
 // 🔗 绑定点选模式：记录发起端（开关/压力板 或 门/电梯/睡莲），下一次画布点击落在配对物件上即完成双向绑定
-let bindPick: { key: string; index: number } | null = null;
+let bindPick: { roomId: string; index: number } | null = null;
 
 function ensureKey(key: string): string {
-  return doc.rooms[key] ? key : doc.keyOrder[0] ?? "";
+  return doc.rooms[key] ? key : doc.idOrder[0] ?? "";
 }
 
 // ---- 自动保存（页面崩溃/HMR 兜底） ----
@@ -131,7 +133,9 @@ function log(msg: string, level: "info" | "ok" | "warn" | "err" = "info"): void 
 // ---- 房间导航 ----
 
 function centerCameraOnRoom(key: string): void {
-  const [cx, cy] = key.split(",").map(Number);
+  const r = doc.rooms[key];
+  if (!r) return;
+  const cx = r.x, cy = r.y;
   const w = canvas.clientWidth || 640;
   const h = canvas.clientHeight || 360;
   renderer.camX = (cx + 0.5) * ROOM_COLS * renderer.ts - w / 2;
@@ -153,38 +157,52 @@ function gotoRoom(key: string): void {
   refreshAll();
 }
 
+/** 工作房切换（视角不动）：编辑操作落到邻房时用它——画布里的邻房本来就在眼前，
+ *  瞬移镜头反而打断构图；只切工作房 + 井图高亮/必要时滚动井图视口。 */
+function switchWorkRoom(key: string): void {
+  if (!doc.rooms[key] || key === curKey) return;
+  curKey = key;
+  try {
+    localStorage.setItem(ROOM_KEY_STORE, `${doc.editMapId}|${key}`);
+  } catch {
+    /* 存不进就算了 */
+  }
+  selection = null;
+  multiSel.clear();
+  mmEnsureVisible(key);
+  refreshAll();
+}
+
 /** 切换正在编辑的地图：房间键失效就落回该图出生点房。 */
 function applyEditMap(mid: string): void {
   if (!doc.switchMap(mid)) return;
-  curKey = doc.rooms[curKey] ? curKey : spawnRoomKey();
+  // 房间 id 跨图可能撞名（各图都从 R01 起分配）：切图一律落到该图出生点房，避免歧义
+  curKey = spawnRoomKey();
   selection = null;
   multiSel.clear();
   centerCameraOnRoom(curKey);
   mmEnsureVisible(curKey);
   refreshAll();
   const m = doc.maps.find((mm) => mm.id === mid);
-  log(`已切到地图 ${m?.name ?? mid}（${mid}）——共 ${doc.keyOrder.length} 房${doc.gameMapId === mid ? "，★游戏地图" : ""}。`, "ok");
+  log(`已切到地图 ${m?.name ?? mid}（${mid}）——共 ${doc.idOrder.length} 房${doc.gameMapId === mid ? "，★游戏地图" : ""}。`, "ok");
 }
 
 function stepRoom(dir: -1 | 1): void {
-  const i = doc.keyOrder.indexOf(curKey);
-  const n = doc.keyOrder.length;
+  const i = doc.idOrder.indexOf(curKey);
+  const n = doc.idOrder.length;
   if (n === 0) return;
-  gotoRoom(doc.keyOrder[(i + dir + n) % n]);
+  gotoRoom(doc.idOrder[(i + dir + n) % n]);
 }
 
-function createRoom(key: string): void {
-  if (doc.rooms[key]) {
-    log(`房间 ${key} 已存在`, "warn");
+function createRoom(cx: number, cy: number): void {
+  if (doc.roomAt(doc.curMap(), cx, cy)) {
+    log(`网格 (${cx},${cy}) 已有房间`, "warn");
     return;
   }
-  if (!doc.isValidKey(key)) {
-    log(`无效的房间坐标 '${key}'（应为 col,row）`, "err");
-    return;
-  }
-  if (doc.addRoom(key)) {
-    log(`已新建房间 ${key}（封闭边框+全空气，自行开洞）`, "ok");
-    gotoRoom(key);
+  const rid = doc.addRoom(cx, cy);
+  if (rid) {
+    log(`已新建房间 ${rid} @ (${cx},${cy})（封闭边框+全空气，自行开洞）`, "ok");
+    gotoRoom(rid);
   }
 }
 
@@ -260,17 +278,16 @@ function nextSeedId(): number {
 }
 
 // gen6/nextSeedId 都要全文档扫描，别在渲染帧里重算：缓存，refreshAll（=每次 doc 变化/切房）时刷新
-let ctxCache: { nextDoorId: string; nextSeedId: number; propId: string; roomKey: string; roomId: string } | null = null;
+let ctxCache: { nextDoorId: string; nextSeedId: number; propId: string; roomId: string } | null = null;
 function refreshPlaceCtx(): void {
   ctxCache = {
     nextDoorId: nextDoorId(),
     nextSeedId: nextSeedId(),
     propId: placePropId,
-    roomKey: curKey,
-    roomId: doc.rooms[curKey]?.id ?? curKey,
+    roomId: curKey,
   };
 }
-function placeCtx(): { nextDoorId: string; nextSeedId: number; propId: string; roomKey: string; roomId: string } {
+function placeCtx(): { nextDoorId: string; nextSeedId: number; propId: string; roomId: string } {
   if (!ctxCache) refreshPlaceCtx();
   return ctxCache!;
 }
@@ -308,9 +325,9 @@ function strList(v: unknown): string[] {
 
 /** 双向绑定 trigger↔target：trigger.controls += target.id；target.triggeredBy += trigger.id。
  *  任一端缺 id 就现场分配（在 mutate 内做，撤销能完整回退）。 */
-function tryBind(src: { key: string; index: number }, dst: { key: string; index: number }): void {
-  const a = doc.rooms[src.key]?.objects[src.index];
-  const b = doc.rooms[dst.key]?.objects[dst.index];
+function tryBind(src: { roomId: string; index: number }, dst: { roomId: string; index: number }): void {
+  const a = doc.rooms[src.roomId]?.objects[src.index];
+  const b = doc.rooms[dst.roomId]?.objects[dst.index];
   if (!a || !b) return;
   if (isTrigger(a) === isTrigger(b)) {
     log("绑定必须是 开关/压力板 ↔ 门/电梯/睡莲 的组合。", "err");
@@ -321,8 +338,8 @@ function tryBind(src: { key: string; index: number }, dst: { key: string; index:
   let trigId = "";
   let targId = "";
   doc.mutate(() => {
-    const t = doc.rooms[trig.key]?.objects[trig.index];
-    const g = doc.rooms[targ.key]?.objects[targ.index];
+    const t = doc.rooms[trig.roomId]?.objects[trig.index];
+    const g = doc.rooms[targ.roomId]?.objects[targ.index];
     if (!t || !g) return;
     trigId = String(t.id ?? "") || gen6();
     t.id = trigId;
@@ -422,18 +439,18 @@ function deleteMulti(): void {
   if (!multiSel.size) return;
   const victims = [...multiSel]
     .map((id) => {
-      const k = id.slice(0, id.lastIndexOf("#"));
-      return { key: k, index: Number(id.slice(id.lastIndexOf("#") + 1)) };
+      const rid = id.slice(0, id.lastIndexOf("#"));
+      return { roomId: rid, index: Number(id.slice(id.lastIndexOf("#") + 1)) };
     })
-    .filter((v) => doc.rooms[v.key]?.objects[v.index]);
+    .filter((v) => doc.rooms[v.roomId]?.objects[v.index]);
   if (!victims.length) {
     multiSel.clear();
     return;
   }
   doc.mutate(() => {
     // 从后往前删（同房间内序号前移不影响前面的索引）
-    for (const { key, index } of [...victims].sort((a, b) => b.index - a.index)) {
-      const room = doc.rooms[key];
+    for (const { roomId, index } of [...victims].sort((a, b) => b.index - a.index)) {
+      const room = doc.rooms[roomId];
       const o = room?.objects[index];
       if (!o) continue;
       room.objects.splice(index, 1);
@@ -631,7 +648,7 @@ async function copyRooms(): Promise<void> {
 function exportMapFile(): void {
   const m = doc.curMap();
   downloadText(`plantwell-map-${m.id}.json`, doc.exportMap());
-  log(`已导出地图 ${m.name}（${m.id}，${m.keyOrder.length} 房）→ plantwell-map-${m.id}.json`, "ok");
+  log(`已导出地图 ${m.name}（${m.id}，${m.idOrder.length} 房）→ plantwell-map-${m.id}.json`, "ok");
 }
 
 function importMapFile(file: File): void {
@@ -649,7 +666,7 @@ function importMapFile(file: File): void {
     centerCameraOnRoom(curKey);
     mmEnsureVisible(curKey);
     refreshAll();
-    log(`已导入「${doc.curMap().name}」为 ${doc.curMap().id}（${doc.keyOrder.length} 房）。${res.warn ?? ""}`, "ok");
+    log(`已导入「${doc.curMap().name}」为 ${doc.curMap().id}（${doc.idOrder.length} 房）。${res.warn ?? ""}`, "ok");
     if (res.warn) toast(`⚠ ${res.warn}`, "warn");
   };
   reader.readAsText(file, "utf8");
@@ -757,7 +774,7 @@ function buildObjPalette(): void {
 
 function refreshRoomSelect(): void {
   const sel = $("#roomSelect") as HTMLSelectElement;
-  sel.innerHTML = doc.keyOrder.map((k) => `<option value="${k}">${k}</option>`).join("");
+  sel.innerHTML = doc.idOrder.map((k) => `<option value="${k}">${k}</option>`).join("");
   sel.value = curKey;
 }
 
@@ -785,7 +802,7 @@ function refreshMapPanel(): void {
   ($("#mapName") as HTMLInputElement).value = m.name;
   ($("#spawnX") as HTMLInputElement).value = String(m.spawn.x);
   ($("#spawnY") as HTMLInputElement).value = String(m.spawn.y);
-  $("#mapMeta").textContent = `${m.id} · ${m.keyOrder.length} 房 · 出生房 ${m.spawn.room}`;
+  $("#mapMeta").textContent = `${m.id} · ${m.idOrder.length} 房 · 出生房 ${m.spawn.room}`;
 }
 
 // ---- 井结构小地图：固定大小视口 + 场景缩略图选房/建房 ----
@@ -803,13 +820,13 @@ let mmPan: { x: number; y: number; mmX: number; mmY: number } | null = null;
 let mapHover: { cx: number; cy: number } | null = null;
 
 function mapBounds(): { minCx: number; maxCx: number; minCy: number; maxCy: number } {
-  const coords = doc.keyOrder.map((k) => k.split(",").map(Number));
-  if (!coords.length) return { minCx: 0, maxCx: 0, minCy: 0, maxCy: 0 };
+  const rs = Object.values(doc.rooms);
+  if (!rs.length) return { minCx: 0, maxCx: 0, minCy: 0, maxCy: 0 };
   return {
-    minCx: Math.min(...coords.map((a) => a[0])),
-    maxCx: Math.max(...coords.map((a) => a[0])),
-    minCy: Math.min(...coords.map((a) => a[1])),
-    maxCy: Math.max(...coords.map((a) => a[1])),
+    minCx: Math.min(...rs.map((r) => r.x)),
+    maxCx: Math.max(...rs.map((r) => r.x)),
+    minCy: Math.min(...rs.map((r) => r.y)),
+    maxCy: Math.max(...rs.map((r) => r.y)),
   };
 }
 
@@ -866,7 +883,9 @@ function refreshWorldGrid(): void {
 function mmEnsureVisible(key: string): void {  if ($("#mapDock").classList.contains("collapsed")) return;
   const cv = $("#roomMap") as HTMLCanvasElement;
   const b = panBounds();
-  const [cx, cy] = key.split(",").map(Number);
+  const rr = doc.rooms[key];
+  if (!rr) return;
+  const cx = rr.x, cy = rr.y;
   const px = (cx - b.minCx) * CELL_W;
   const py = (cy - b.minCy) * CELL_H;
   const m = 6;
@@ -885,7 +904,9 @@ function mmCenterOn(key: string): void {
   if ($("#mapDock").classList.contains("collapsed")) return;
   const cv = $("#roomMap") as HTMLCanvasElement;
   const b = panBounds();
-  const [cx, cy] = key.split(",").map(Number);
+  const rr = doc.rooms[key];
+  if (!rr) return;
+  const cx = rr.x, cy = rr.y;
   mmX = (cx - b.minCx) * CELL_W + CELL_W / 2 - cv.width / 2;
   mmY = (cy - b.minCy) * CELL_H + CELL_H / 2 - cv.height / 2;
   mmClamp();
@@ -893,8 +914,9 @@ function mmCenterOn(key: string): void {
 }
 
 function drawMapCell(c: CanvasRenderingContext2D, cx: number, cy: number, px: number, py: number): void {
-  const key = `${cx},${cy}`;
-  const room = doc.rooms[key];
+  const found = doc.roomAt(doc.curMap(), cx, cy);
+  const key = found?.id ?? "";
+  const room = found;
   const hovered = mapHover?.cx === cx && mapHover?.cy === cy;
 
   if (!room) {
@@ -1012,17 +1034,18 @@ roomMapEl.addEventListener("mouseleave", () => {
 roomMapEl.addEventListener("click", (e) => {
   const cell = cellFromMouse(e);
   if (!cell) return;
-  const key = `${cell.cx},${cell.cy}`;
-  if (doc.rooms[key]) {
-    gotoRoom(key);
-    if (pickField != null) log(`已切到房间 ${key}：点房间画布为「${pickField}」落点。`, "warn");
+  const found = doc.roomAt(doc.curMap(), cell.cx, cell.cy);
+  if (found) {
+    gotoRoom(found.id);
+    if (pickField != null) log(`已切到房间 ${found.id}：点房间画布为「${pickField}」落点。`, "warn");
     return;
   }
   // 空位：左键点击 = 确认后创建新房间（选点/绑定点选进行中时不打断）
   if (pickField != null || bindPick) return;
   if (!window.confirm(`在 (${cell.cx},${cell.cy}) 创建新房间？（封闭边框+全空气，自行开洞）`)) return;
-  createRoom(key);
-  if (doc.rooms[key]) mmEnsureVisible(key);
+  createRoom(cell.cx, cell.cy);
+  const created = doc.roomAt(doc.curMap(), cell.cx, cell.cy);
+  if (created) mmEnsureVisible(created.id);
 });
 
 
@@ -1032,7 +1055,7 @@ function fieldRow(o: ObjRec, f: FieldSpec): string {
     // 多对多绑定列表：触发方显示 controls（binding id），被控方显示 triggeredBy（触发方 flagKey）。
     // 🔗 绑定 = 进点选模式（画布上点配对物件，双向写入）；× = 双向解除。
     const list = strList(v);
-    const armed = bindPick != null && bindPick.key === curKey && bindPick.index === selection;
+    const armed = bindPick != null && bindPick.roomId === curKey && bindPick.index === selection;
     const chips = list
       .map(
         (id) =>
@@ -1326,11 +1349,11 @@ function refreshInspector(): void {
   box.querySelectorAll("button[data-bindpick]").forEach((b) => {
     b.addEventListener("click", () => {
       if (selection == null) return;
-      if (bindPick && bindPick.key === curKey && bindPick.index === selection) {
+      if (bindPick && bindPick.roomId === curKey && bindPick.index === selection) {
         bindPick = null;
         log("已取消绑定。", "warn");
       } else {
-        bindPick = { key: curKey, index: selection };
+        bindPick = { roomId: curKey, index: selection };
         const o = doc.rooms[curKey]?.objects[selection];
         log(
           isTrigger(o)
@@ -1452,7 +1475,7 @@ function refreshAll(): void {
 
 // ---- 画布交互 ----
 
-function mouseTile(e: MouseEvent): { key: string; x: number; y: number } | null {
+function mouseTile(e: MouseEvent): { roomId: string; x: number; y: number } | null {
   const r = canvas.getBoundingClientRect();
   return renderer.toWorldTile(doc, e.clientX - r.left, e.clientY - r.top);
 }
@@ -1482,29 +1505,38 @@ canvas.addEventListener("pointerdown", (e) => {
   if (bindPick) {
     const src = bindPick;
     bindPick = null;
-    const idx = wt ? hitObject(wt.key, wt.x, wt.y) : null;
+    const idx = wt ? hitObject(wt.roomId, wt.x, wt.y) : null;
     if (idx == null) log("已取消绑定（没点到物件）。", "warn");
-    else tryBind(src, { key: wt.key, index: idx });
+    else tryBind(src, { roomId: wt.roomId, index: idx });
     refreshInspector();
     return;
   }
+  // 📍 出生点选点：点哪格，出生点（房间+像素）就落到哪
+  if (spawnPick) {
+    spawnPick = false;
+    doc.setSpawnRoom(wt.roomId);
+    doc.setSpawnPos(wt.x * 10 + 5, wt.y * 10 + 5);
+    log(`出生点 → ${wt.roomId} (${wt.x * 10 + 5},${wt.y * 10 + 5})`, "ok");
+    refreshAll();
+    return;
+  }
   // 落到哪个房间，工作房就切到哪（点击别的房间的物件/落点=跨房编辑）
-  const roomKey = wt.key;
+  const roomId = wt.roomId;
   const tile = { x: wt.x, y: wt.y };
   // 🎯 选点模式：location 只能点所在房；end 可跨房点选
   if (pickField != null && pickIndex != null && pickHome != null) {
     const idx = pickIndex;
     const key = pickField;
     const home = pickHome;
-    if (key === "location" && roomKey !== home) {
+    if (key === "location" && roomId !== home) {
       log("本体位置属于所在房间，不能点到别的房间。跨房终点请用「终点」字段。", "warn");
     } else {
-      const rid = doc.rooms[roomKey]?.id ?? roomKey;
+      const rid = doc.rooms[roomId]?.id ?? roomId;
       doc.mutate(() => {
         const o = doc.rooms[home]?.objects[idx];
         if (o) o[key] = { room_id: rid, x: tile.x, y: tile.y };
       });
-      log(`已选点 ${roomKey} (${tile.x},${tile.y}) → ${key}`, "ok");
+      log(`已选点 ${roomId} (${tile.x},${tile.y}) → ${key}`, "ok");
     }
     pickField = null;
     pickIndex = null;
@@ -1515,14 +1547,14 @@ canvas.addEventListener("pointerdown", (e) => {
   switch (tool) {
     case "rect": {
       // 矩形填充：建筑材料（岩壁/空气）拖拽画矩形，材料=调色板当前选中的瓦片。
-      // 落在邻房=直接切工作房执行（用户要求：在哪个房操作就编辑哪个房）
-      if (roomKey !== curKey) gotoRoom(roomKey);
+      // 落在邻房=直接切工作房执行（视角不动，井图高亮跟随）
+      if (roomId !== curKey) switchWorkRoom(roomId);
       rectAnchor = tile;
       break;
     }
     case "place": {
       if (palSel.kind === "tile") {
-        if (roomKey !== curKey) gotoRoom(roomKey);
+        if (roomId !== curKey) switchWorkRoom(roomId);
         // 建筑类：长按拖动铺设（空气=擦除）
         paintValue = brushTile;
         paintPre = doc.beginLive();
@@ -1530,15 +1562,15 @@ canvas.addEventListener("pointerdown", (e) => {
         lastPaint = tile;
         doc.touch();
       } else {
-        // 物件放置：可放到视野里任意房间（跨房装电梯/睡莲的正路）
-        if (roomKey !== curKey) gotoRoom(roomKey);
+        // 物件放置：可放到视野里任意房间（跨房装电梯/睡莲的正路）；视角不动
+        if (roomId !== curKey) switchWorkRoom(roomId);
         placeObject(tile.x, tile.y);
       }
       break;
     }
     case "select": {
       // 框选或单选：按下点在物件上=单选+拖动；在空白处=框选多选（建筑瓦片不参与）
-      const idx = hitObject(roomKey, tile.x, tile.y);
+      const idx = hitObject(roomId, tile.x, tile.y);
       if (idx == null) {
         // 框选开始：清单选，marquee 随拖拽更新（pointermove）
         selection = null;
@@ -1547,12 +1579,12 @@ canvas.addEventListener("pointerdown", (e) => {
         refreshInspector();
         return;
       }
-      if (roomKey !== curKey) gotoRoom(roomKey);
+      if (roomId !== curKey) switchWorkRoom(roomId);
       selection = idx;
-      const o = doc.rooms[roomKey]!.objects[idx];
+      const o = doc.rooms[roomId]!.objects[idx];
       const pos = objPos(o);
       dragObj = {
-        key: roomKey,
+        roomId: roomId,
         index: idx,
         startX: tile.x,
         startY: tile.y,
@@ -1577,7 +1609,7 @@ canvas.addEventListener("pointermove", (e) => {
   }
   const wt = mouseTile(e);
   hover = wt ? { x: wt.x, y: wt.y } : null;
-  hoverKey = wt ? wt.key : null;
+  hoverKey = wt ? wt.roomId : null;
   if (wt) lastTile = { x: wt.x, y: wt.y };
   if (wt && marquee) {
     // 框选拖拽：矩形随鼠标更新（跨房坐标各自成立，pointerup 时统一收集）
@@ -1585,7 +1617,7 @@ canvas.addEventListener("pointermove", (e) => {
     marquee.y1 = wt.y;
   }
   if (wt && paintValue) {
-    if (wt.key !== curKey) return; // 铺设中拖出房界就不继续画
+    if (wt.roomId !== curKey) return; // 铺设中拖出房界就不继续画
     const tile = { x: wt.x, y: wt.y };
     if (lastPaint) paintLine(lastPaint, tile, paintValue);
     else paintRaw(tile.x, tile.y, paintValue);
@@ -1593,7 +1625,7 @@ canvas.addEventListener("pointermove", (e) => {
     doc.touch();
   }
   if (wt && dragObj) {
-    const o = doc.rooms[dragObj.key]?.objects[dragObj.index];
+    const o = doc.rooms[dragObj.roomId]?.objects[dragObj.index];
     if (o) {
       const loc = { ...objPos(o) };
       // 拖到别的房间：坐标跟随新房间并更新 room_id
@@ -1602,7 +1634,7 @@ canvas.addEventListener("pointermove", (e) => {
       const nx = dragObj.ox + dx;
       const ny = dragObj.oy + dy;
       if (nx < -4 || ny < -4 || nx > 35 || ny > 21) return; // 拖太远就不动（防误丢）
-      loc.room_id = doc.rooms[wt.key]?.id ?? loc.room_id;
+      loc.room_id = doc.rooms[wt.roomId]?.id ?? loc.room_id;
       loc.x = Math.max(0, Math.min(31, nx));
       loc.y = Math.max(0, Math.min(17, ny));
       o.location = loc;
@@ -1657,7 +1689,7 @@ canvas.addEventListener("pointerup", () => {
     return;
   }
   if (dragObj) {
-    const o = doc.rooms[dragObj.key]?.objects[dragObj.index];
+    const o = doc.rooms[dragObj.roomId]?.objects[dragObj.index];
     const moved = o && (objPos(o).x !== dragObj.ox || objPos(o).y !== dragObj.oy);
     if (moved) doc.commitLive(dragObj.pre);
     else doc.cancelLive();
@@ -1719,6 +1751,11 @@ addEventListener("keydown", (e) => {
       bindPick = null;
       log("已取消绑定。", "warn");
       refreshInspector();
+      return;
+    }
+    if (spawnPick) {
+      spawnPick = false;
+      log("已取消出生点选点。", "warn");
       return;
     }
     if (pickField != null) {
@@ -1818,6 +1855,10 @@ $("#mapName").addEventListener("change", (e) => {
   doc.renameMap(doc.editMapId, v);
   log(`地图已改名：${v}`, "ok");
 });
+$("#pickSpawn").addEventListener("click", () => {
+  spawnPick = true;
+  log("出生点选点：点击房间画布任意一格，把出生点设到那（Esc 取消）。", "info");
+});
 $("#mapSetSpawn").addEventListener("click", () => {
   doc.setSpawnRoom(curKey);
   refreshAll();
@@ -1838,7 +1879,7 @@ $("#mapDelete").addEventListener("click", () => {
     log("最后一张地图不能删——建一张新的再删这张。", "warn");
     return;
   }
-  if (!window.confirm(`删除地图「${m.name}」（${m.id}，${m.keyOrder.length} 房）？不可撤销（除非保存前还原）。`)) return;
+  if (!window.confirm(`删除地图「${m.name}」（${m.id}，${m.idOrder.length} 房）？不可撤销（除非保存前还原）。`)) return;
   const hadFile = !!saveHash.map[m.id];
   doc.deleteMap(m.id);
   curKey = spawnRoomKey();
@@ -1943,17 +1984,9 @@ $("#addLight").addEventListener("click", () => {
     (room.lights ??= []).push({ x: 160, y: 90, r: 100 });
   });
 });
-$("#newRoomKey").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") ($("#addRoom") as HTMLButtonElement).click();
-});
-$("#addRoom").addEventListener("click", () => {
-  const key = ($("#newRoomKey") as HTMLInputElement).value.trim();
-  createRoom(key);
-  ($("#newRoomKey") as HTMLInputElement).value = "";
-});
 $("#delRoom").addEventListener("click", () => {
   if (!doc.rooms[curKey]) return;
-  const others = doc.keyOrder.filter((k) => k !== curKey).length;
+  const others = doc.idOrder.filter((k) => k !== curKey).length;
   if (!window.confirm(`删除房间 ${curKey}？${others === 0 ? "（这是最后一个房间！）" : ""}`)) return;
   doc.deleteRoom(curKey);
   curKey = ensureKey(curKey);
@@ -2048,6 +2081,7 @@ void probeChannel();
       gameMap: doc.gameMapId,
       maps: doc.maps.map((m) => m.id),
       mm: { x: Math.round(mmX), y: Math.round(mmY) },
+      hover: mapHover,
       multi: multiSel.size,
       // 画布相机（探针用）：世界格 → 屏幕px = (格+0.5)*ts - cam + camRoomOffset
       cam: { ts: renderer.ts, camX: Math.round(renderer.camX), camY: Math.round(renderer.camY) },

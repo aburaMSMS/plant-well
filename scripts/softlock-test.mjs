@@ -22,19 +22,18 @@ const check = (name, ok) => {
 
 // ---- 功能攀回：[房间, 根台落点x, 每次跳跃的方向序列, 上层地面脚部y上限] ----
 const climbs = [
-  ["1,0", 65, ["KeyD", "KeyD", "KeyD", "KeyD", "KeyD", "KeyD"], 141, "(1,0) 竖坑 → 主地面"],
-  ["1,1", 245, ["KeyD", "KeyD", "KeyA", "KeyA", "KeyA", "KeyA"], 141, "(1,1) 门洞 → 主地面"],
-  ["1,2", 125, ["KeyD", "KeyD", "KeyD", "KeyD", "KeyD", "KeyD"], 141, "(1,2) 底洞 → 主地面"],
-  ["2,3", 155, ["KeyD", "KeyD", "KeyA", "KeyA", "KeyA", "KeyA"], 141, "(2,3) 底洞 → 主地面"],
-  ["1,5", 145, ["KeyD", "KeyD", "KeyA", "KeyA", "KeyA", "KeyA"], 141, "(1,5) 底洞 → 主地面"],
-  ["1,3", 50, ["KeyA", "KeyA", "KeyA", "KeyA", "KeyA", "KeyA"], 147, "(1,3) 底坑 → 主地面（更低的地面）"],
-  ["1,4", 210, ["KeyD", "KeyD", "KeyD", "KeyD", "KeyD", "KeyD"], 147, "(1,4) 底洞 → 主地面（更低的地面）"],
+  ["R05", 65, ["KeyD", "KeyD", "KeyD", "KeyD", "KeyD", "KeyD"], 141, "(1,0) 竖坑 → 主地面"],
+  ["R06", 245, ["KeyD", "KeyD", "KeyA", "KeyA", "KeyA", "KeyA"], 141, "(1,1) 门洞 → 主地面"],
+  ["R07", 125, ["KeyD", "KeyD", "KeyD", "KeyD", "KeyD", "KeyD"], 141, "(1,2) 底洞 → 主地面"],
+  ["R14", 155, ["KeyD", "KeyD", "KeyA", "KeyA", "KeyA", "KeyA"], 141, "(2,3) 底洞 → 主地面"],
+  ["R10", 145, ["KeyD", "KeyD", "KeyA", "KeyA", "KeyA", "KeyA"], 141, "(1,5) 底洞 → 主地面"],
+  ["R08", 50, ["KeyA", "KeyA", "KeyA", "KeyA", "KeyA", "KeyA"], 147, "(1,3) 底坑 → 主地面（更低的地面）"],
+  ["R09", 210, ["KeyD", "KeyD", "KeyD", "KeyD", "KeyD", "KeyD"], 147, "(1,4) 底洞 → 主地面（更低的地面）"],
 ];
 for (const [key, sx, dirs, maxY, desc] of climbs) {
   await page.evaluate(([k, x, y]) => {
     const w = window.__pw.world;
-    const [cx, cy] = k.split(",").map(Number);
-    w.loadRoom(cx, cy);
+    w.loadRoom(k);
     w.player.spawnAt(x, y);
     w.lastSafeX = x;
     w.lastSafeY = y;

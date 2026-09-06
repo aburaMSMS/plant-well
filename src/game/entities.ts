@@ -22,7 +22,7 @@ import { paletteFor } from "./decor";
 import type { Light } from "../engine/light";
 import { mat, rgbOf, shade } from "../data/materials";
 import { propById, type PropDef } from "../data/props";
-import { ROOM_KEY_BY_ID, BINDING_KIND, type ObjDef, type ObjPos } from "../data/maps";
+import { ROOM_POS, BINDING_KIND, type ObjDef, type ObjPos } from "../data/maps";
 
 export interface Rect {
   x: number;
@@ -42,7 +42,7 @@ export interface Entity {
   /** 所属物件类型键：世界层"基础微光"按它取材质。 */
   matKey?: string;
   /** 电梯等载具的所属房间键（跨房投递用）。 */
-  homeKey?: string;
+  homeId?: string;
   update(w: World): void;
   draw(ctx: CanvasRenderingContext2D, w: World): void;
   solidRect?(w: World): Rect | null;
@@ -71,7 +71,7 @@ export abstract class BaseEntity implements Entity {
   /** 所属物件类型键：世界层"基础微光"按它取材质。 */
   matKey?: string;
   /** 载具的所属房间键（跨房投递用）。 */
-  homeKey?: string;
+  homeId?: string;
   /** 环境相位：摇曳/闪烁/脉动的错相种子（需要确定性的子类可覆盖为 0）。 */
   protected t = Math.random() * 10;
   abstract update(w: World): void;
@@ -2150,11 +2150,11 @@ export class PitcherElevator extends MoverPlatform {
   /** 空笼跨房挂载在世界级 detached 列表（玩家视野外飞行）：不检测登乘——登乘判定用的是玩家坐标，跨房间系比较无意义 */
   detached = false;
   private handedOff = false; // 跨房行程：已迁入目标房
-  readonly originKey: string; // 出发房网格键（返回行程的 handoff 目标）
+  readonly originId: string; // 出发房网格键（返回行程的 handoff 目标）
   private returnTimer: number | null = null; // back=true：吐客后倒计时空笼返回起点
   private readonly endOff: { x: number; y: number }; // 端到端世界向量（跨房含邻房偏移）
   private readonly endShift: { x: number; y: number }; // 目标房原点相对本房的世界 px 偏移
-  homeKey: string;
+  homeId: string;
   readonly endRoom: string; // end.room_id：终点所在房间（可跨房）
   private readonly speed: number;
   readonly id: string;
@@ -2164,15 +2164,15 @@ export class PitcherElevator extends MoverPlatform {
     pos: ObjPos,
     end: ObjPos,
     o: { speed?: number; dwell?: number; id: string; back?: boolean },
-    homeKey = "",
+    homeId = "",
     flags?: ReadonlySet<string>,
   ) {
     super();
     this.rect = { x: pos.x * TILE, y: pos.y * TILE, w: TILE, h: 2 * TILE };
     this.x = this.rect.x + TILE / 2;
     this.y = this.rect.y;
-    this.homeKey = homeKey;
-    this.originKey = homeKey;
+    this.homeId = homeId;
+    this.originId = homeId;
     this.endRoom = end.room_id;
     this.speed = Math.max(8, o.speed ?? 40);
     this.id = o.id;
@@ -2180,14 +2180,14 @@ export class PitcherElevator extends MoverPlatform {
     this.back = o.back ?? false;
     this.end = flags?.has(`lift:${o.id}`) ? 1 : 0; // 到站状态持久：flag=停在中标端（默认行为）
     // 端到端世界向量：终点格（含目标房网格偏移）- 起点格。同房时就是普通向量。
-    const [hcx, hcy] = homeKey.split(",").map(Number);
-    const [ecx, ecy] = end.room_id.split(",").map(Number); // end.room_id 已是网格键（工厂里解析过）
-    this.endShift = { x: (ecx - hcx) * 32 * TILE, y: (ecy - hcy) * 18 * TILE };
+    const hp = ROOM_POS[homeId] ?? { x: 0, y: 0 };
+    const ep = ROOM_POS[end.room_id] ?? hp; // end.room_id 是房间 id（Rxx）
+    this.endShift = { x: (ep.x - hp.x) * 32 * TILE, y: (ep.y - hp.y) * 18 * TILE };
     this.endOff = { x: end.x * TILE - this.rect.x + this.endShift.x, y: end.y * TILE - this.rect.y + this.endShift.y };
-    // 持久恢复：flag=停在远端 → 以终点房形态醒来（homeKey/off/handedOff 全按远端）；
-    // originKey 仍是数据原位，返程/触发语义不变
+    // 持久恢复：flag=停在远端 → 以终点房形态醒来（homeId/off/handedOff 全按远端）；
+    // originId 仍是数据原位，返程/触发语义不变
     if (this.end === 1) {
-      this.homeKey = this.endRoom;
+      this.homeId = this.endRoom;
       this.handedOff = true;
       this.off = { x: this.endOff.x - this.endShift.x, y: this.endOff.y - this.endShift.y };
       // 持久恢复=静止停在远端：不许立刻载人/发车（玩家可能出生在笼口位置），走出笼身才重新武装
@@ -2281,8 +2281,8 @@ export class PitcherElevator extends MoverPlatform {
       const going = this.end === 1 ? this.endShift : { x: -this.endShift.x, y: -this.endShift.y };
       const away =
         this.end === 1
-          ? !this.handedOff && this.endRoom !== this.homeKey
-          : this.handedOff && this.homeKey !== this.originKey;
+          ? !this.handedOff && this.endRoom !== this.homeId
+          : this.handedOff && this.homeId !== this.originId;
       if (away) {
         const sumX = this.rect.x + this.off.x;
         const sumY = this.rect.y + this.off.y;
@@ -2295,7 +2295,7 @@ export class PitcherElevator extends MoverPlatform {
               ? sumY <= -2 * TILE
               : sumY >= ROOM_H;
         if (passed) {
-          const toRoom = this.end === 1 ? this.endRoom : this.originKey;
+          const toRoom = this.end === 1 ? this.endRoom : this.originId;
           const shift = this.end === 1 ? this.endShift : { x: -this.endShift.x, y: -this.endShift.y };
           w.handoffElevator(this, toRoom, shift);
         }
@@ -2312,6 +2312,7 @@ export class PitcherElevator extends MoverPlatform {
           w.player.x = cageBottomX;
           w.player.y = cageBottomY;
           w.player.vy = 0;
+          w.player.exitJump = true; // 出舱赠跳：笼口悬空也能立刻起跳一次
           audio.plant();
           w.particles.burst(cageBottomX, cageBottomY + 4, 10, { speed: 26, color: "#b8e0a0", life: 0.5, grav: 40 });
           this.state = "idle"; // 单程：停在这一端，等玩家再上或开关再触发
@@ -2337,7 +2338,7 @@ export class PitcherElevator extends MoverPlatform {
   /** 跨房 handoff：world.loadRoom 后调用——笼子换到目标房坐标系（off 平移房间差），
    *  行程目标（endOff / 0）始终是出发房坐标，故去程/返程各做一次 handoff 即可闭环。 */
   adopt(endRoom: string, shift: { x: number; y: number }, handed: boolean): void {
-    this.homeKey = endRoom;
+    this.homeId = endRoom;
     this.off.x -= shift.x;
     this.off.y -= shift.y;
     this.handedOff = handed;
@@ -2448,12 +2449,12 @@ export class SpikeRow extends BaseEntity {
 
 export class Candle extends LightSource {
   readonly rect: Rect;
-  constructor(tx: number, ty: number, homeKey = "", opts: { radius?: number; intensity?: number } = {}) {
+  constructor(tx: number, ty: number, homeId = "", opts: { radius?: number; intensity?: number } = {}) {
     super(18, opts);
     this.rect = { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE };
     this.x = this.rect.x + TILE / 2;
     this.y = this.rect.y + TILE / 2;
-    this.homeKey = homeKey;
+    this.homeId = homeId;
   }
   update(_w: World): void {
     this.t += 1 / 60;
@@ -2497,12 +2498,12 @@ export class Candle extends LightSource {
 
 export class HangingLamp extends LightSource {
   readonly rect: Rect;
-  constructor(tx: number, ty: number, homeKey = "", opts: { radius?: number; intensity?: number } = {}) {
+  constructor(tx: number, ty: number, homeId = "", opts: { radius?: number; intensity?: number } = {}) {
     super(24, opts);
     this.rect = { x: tx * TILE, y: ty * TILE, w: TILE, h: 2 * TILE };
     this.x = this.rect.x + TILE / 2;
     this.y = this.rect.y + 2 * TILE;
-    this.homeKey = homeKey;
+    this.homeId = homeId;
   }
   update(_w: World): void {
     this.t += 1 / 60;
@@ -2549,12 +2550,12 @@ export class HangingLamp extends LightSource {
 
 export class GlowStone extends LightSource {
   readonly rect: Rect;
-  constructor(tx: number, ty: number, homeKey = "", opts: { radius?: number; intensity?: number } = {}) {
+  constructor(tx: number, ty: number, homeId = "", opts: { radius?: number; intensity?: number } = {}) {
     super(16, opts);
     this.rect = { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE };
     this.x = this.rect.x + TILE / 2;
     this.y = this.rect.y + TILE / 2;
-    this.homeKey = homeKey;
+    this.homeId = homeId;
   }
   update(_w: World): void {
     this.t += 1 / 60;
@@ -2603,12 +2604,12 @@ export class GlowStone extends LightSource {
 export class FireflySwarm extends LightSource {
   readonly rect: Rect;
   private flies = [0, 1, 2].map((i) => ({ ph: i * 2.1, r: 5 + i * 3, sp: 0.5 + i * 0.17 }));
-  constructor(tx: number, ty: number, homeKey = "", opts: { radius?: number; intensity?: number } = {}) {
+  constructor(tx: number, ty: number, homeId = "", opts: { radius?: number; intensity?: number } = {}) {
     super(16, opts);
     this.rect = { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE };
     this.x = this.rect.x + TILE / 2;
     this.y = this.rect.y + TILE / 2;
-    this.homeKey = homeKey;
+    this.homeId = homeId;
   }
   update(_w: World): void {
     this.t += 1 / 60;
@@ -2732,9 +2733,9 @@ export class SavePoint extends BaseEntity {
 // room_id（"R07"）在此统一解析成游戏内部使用的网格键；返回数组 = 一个物件格子生成多个实体。
 // ObjOf 把每条工厂的参数收窄成对应的具体 ObjDef 成员（判别联合按 type 取）。
 type ObjOf<T extends ObjDef["type"]> = Extract<ObjDef, { type: T }>;
-// key = 存档 flag 键（"房#序号"）；homeKey = 网格键（载具所属房间）——两个用途别混：
-// 电梯拿 homeKey 和 end.room_id 比较判断是否跨房，传成 flag 键会让同房电梯到站也"跨房投递"
-type AnyEntityFactory = (o: never, key: string, flags: ReadonlySet<string>, homeKey: string) => BaseEntity | BaseEntity[];
+// key = 存档 flag 键（"房#序号"）；homeId = 网格键（载具所属房间）——两个用途别混：
+// 电梯拿 homeId 和 end.room_id 比较判断是否跨房，传成 flag 键会让同房电梯到站也"跨房投递"
+type AnyEntityFactory = (o: never, key: string, flags: ReadonlySet<string>, homeId: string) => BaseEntity | BaseEntity[];
 export const ENTITY_TYPES = {
   item: (o: ObjOf<"item">) => new Pickup(o.location.x * 10 + 5, o.location.y * 10 + 5, { type: "item", item: o.item }, o.r),
   seed: (o: ObjOf<"seed">) => new Pickup(o.location.x * 10 + 5, o.location.y * 10 + 5, { type: "seed", id: o.id }),
@@ -2763,16 +2764,16 @@ export const ENTITY_TYPES = {
     Array.from({ length: o.w }, (_, i) => new CrumblePod(o.location.x + i, o.location.y)),
   lilypad: (o: ObjOf<"lilypad">) => new LilyPad(o.location, o.end, o),
   spike: (o: ObjOf<"spike">) => new SpikeRow(o.location.x, o.location.y, Math.max(1, o.w ?? 1)),
-  candle: (o: ObjOf<"candle">, _key: string, _flags: ReadonlySet<string>, homeKey: string) =>
-    new Candle(o.location.x, o.location.y, homeKey, o),
-  lamp: (o: ObjOf<"lamp">, _key: string, _flags: ReadonlySet<string>, homeKey: string) =>
-    new HangingLamp(o.location.x, o.location.y, homeKey, o),
-  glowstone: (o: ObjOf<"glowstone">, _key: string, _flags: ReadonlySet<string>, homeKey: string) =>
-    new GlowStone(o.location.x, o.location.y, homeKey, o),
-  fireflies: (o: ObjOf<"fireflies">, _key: string, _flags: ReadonlySet<string>, homeKey: string) =>
-    new FireflySwarm(o.location.x, o.location.y, homeKey, o),
-  elevator: (o: ObjOf<"elevator">, _key: string, _flags: ReadonlySet<string>, homeKey: string) =>
-    new PitcherElevator(o.location, { ...o.end, room_id: ROOM_KEY_BY_ID[o.end.room_id] ?? homeKey }, o, homeKey),
+  candle: (o: ObjOf<"candle">, _key: string, _flags: ReadonlySet<string>, homeId: string) =>
+    new Candle(o.location.x, o.location.y, homeId, o),
+  lamp: (o: ObjOf<"lamp">, _key: string, _flags: ReadonlySet<string>, homeId: string) =>
+    new HangingLamp(o.location.x, o.location.y, homeId, o),
+  glowstone: (o: ObjOf<"glowstone">, _key: string, _flags: ReadonlySet<string>, homeId: string) =>
+    new GlowStone(o.location.x, o.location.y, homeId, o),
+  fireflies: (o: ObjOf<"fireflies">, _key: string, _flags: ReadonlySet<string>, homeId: string) =>
+    new FireflySwarm(o.location.x, o.location.y, homeId, o),
+  elevator: (o: ObjOf<"elevator">, _key: string, _flags: ReadonlySet<string>, homeId: string) =>
+    new PitcherElevator(o.location, o.end, o, homeId),
   savepoint: (o: ObjOf<"savepoint">, key: string, flags: ReadonlySet<string>) =>
     new SavePoint(o.location.x, o.location.y, key, flags.has(`sp:${key}`)),
 } satisfies Record<string, AnyEntityFactory>;

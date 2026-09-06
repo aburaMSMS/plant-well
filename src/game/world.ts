@@ -30,7 +30,7 @@ import {
 } from "./entities";
 import { mat } from "../data/materials";
 import { RoomDecor, paletteFor, GLOBAL_LIGHT_DEPTH, type Palette } from "./decor";
-import { ROOMS, ROOM_KEY_BY_ID, SEED_TOTAL, SPAWN, type ObjDef, type RoomDef } from "../data/maps";
+import { ROOMS, ROOM_ID_BY_POS, ROOM_POS, SEED_TOTAL, SPAWN, type ObjDef, type RoomDef } from "../data/maps";
 import {
   BEAN_HOLD_TIME,
   BEAN_MAX_TILES,
@@ -39,7 +39,9 @@ import {
   MAP_ZOOM_MAX,
   MAP_ZOOM_MIN,
   RING_GRAB_RADIUS,
+  ROOM_COLS,
   ROOM_H,
+  ROOM_ROWS,
   ROOM_W,
   TILE,
   TRIGGER_HOLD,
@@ -61,7 +63,8 @@ interface RoomInst {
 }
 
 interface SaveData {
-  room: [number, number];
+  /** 当前房间 id（Rxx）。 */
+  roomId: string;
   x: number;
   y: number;
   items: ItemId[];
@@ -70,9 +73,9 @@ interface SaveData {
   flags: string[];
   hp?: number;
   /** 上次激活的存档花：血尽重生点（缺省回出生点）。 */
-  checkpoint?: { room: [number, number]; x: number; y: number } | null;
+  checkpoint?: { roomId: string; x: number; y: number } | null;
   /** 每株已激活存档花的落点（传送目的地）。键=存档花 flagKey。 */
-  spPos?: Record<string, { room: [number, number]; x: number; y: number }>;
+  spPos?: Record<string, { roomId: string; x: number; y: number }>;
 }
 
 export class World {
@@ -82,6 +85,8 @@ export class World {
 
   cx = 0;
   cy = 0;
+  /** 当前房间 id（Rxx）——全游戏统一的房间标识。cx/cy 只是它的坐标投影（相机/邻接算术用）。 */
+  roomId = SPAWN.room;
   room!: RoomInst;
   flags = new Set<string>();
   seeds = new Set<number>();
@@ -90,7 +95,7 @@ export class World {
   /** 本帧玩家被场景物"吞入"（猪笼草电梯乘坐中）：draw 跳过玩家绘制。每帧 update 开头清零。 */
   hidePlayer = false;
   /** 空笼跨房时挂在世界级的载具：玩家视野外仍照常模拟（飞行/到站/返程计时），
-   *  它的 homeKey 房间被加载时自动归位进该房实体表。 */
+   *  它的 homeId 房间被加载时自动归位进该房实体表。 */
   detached: PitcherElevator[] = [];
 
 
@@ -99,8 +104,10 @@ export class World {
   mapOpen = false;
   camX = 0;
   camY = 0;
-  /** 房间切换：渐隐→瞬间换房→渐显的黑场眨眼。不用平移——任何帧率下都不会有叠影。 */
-  private fade: { t: number; phase: "out" | "in"; ncx: number; ncy: number; nx: number; ny: number; dur?: number } | null = null;
+  /** 房间切换：渐隐→瞬间换房→渐显的黑场眨眼。不用平移——任何帧率下都不会有叠影。
+   *  swap=房间边界越界（黑透时按越界方向平移坐标，世界连续）；
+   *  travel=存档花传送（目标写死，不随位置变）。 */
+  private fade: { t: number; phase: "out" | "in"; dur?: number; swap?: boolean; travel?: { nid: string; nx: number; ny: number } } | null = null;
 
   // 结局两段：巨花绽放 → 黑屏尾声
   ending = false;
@@ -122,7 +129,7 @@ export class World {
   beanStalk: VineStalk | null = null;
   private beanHold = 0;
   // 离房后的豆茎停泊位：期内返回原房即原样捞回，超时丢弃
-  private parkedStalk: { stalk: VineStalk; roomKey: string; timer: number } | null = null;
+  private parkedStalk: { stalk: VineStalk; roomId: string; timer: number } | null = null;
 
   // 本房间的入口（跨房进入时的落点）：未安抚游魂把人送回这里
   entryX = 0;
@@ -130,9 +137,9 @@ export class World {
 
   // ---- 存档花（血量/重生/传送系统）----
   /** 上次激活的存档花落点：血尽时回到这里（null=回出生点）。 */
-  checkpoint: { room: [number, number]; x: number; y: number } | null = null;
+  checkpoint: { roomId: string; x: number; y: number } | null = null;
   /** 每株已激活存档花的传送落点，键=flagKey。 */
-  spPos = new Map<string, { room: [number, number]; x: number; y: number }>();
+  spPos = new Map<string, { roomId: string; x: number; y: number }>();
   /** 本帧玩家身旁的存档花（HUD 提示与交互用）。 */
   nearSave: SavePoint | null = null;
   /** 传送选花模式：地图面板打开，WASD 自由移动光标，压住存档花才能确认转移。 */
@@ -143,7 +150,7 @@ export class World {
   private travelArmed = false; // 连发保险：开传送的那一下方向键松开前不许连发（否则开菜单即挪一格）
   private travelPanTX = 0; // 视野跟随的 pan 目标（实际 pan 每帧向它插值，贴边才滚动）
   private travelPanTY = 0;
-  private travelList: { key: string; cx: number; cy: number; x: number; y: number; mx: number; my: number }[] = [];
+  private travelList: { flagKey: string; id: string; x: number; y: number; mx: number; my: number }[] = [];
   private hurtFlashT = 0;
   /** 本帧刚在存档花前激活过：吞掉这一下"使用键"，免得蔓豆跟着扎根。 */
   private saveJustUsed = false;
@@ -187,8 +194,7 @@ export class World {
     this.checkpoint = null;
     this.spPos.clear();
     this.player.hp = this.player.maxHp;
-    const [cx, cy] = SPAWN.room.split(",").map(Number);
-    this.loadRoom(cx, cy);
+    this.loadRoom(SPAWN.room);
     this.player.spawnAt(SPAWN.x, SPAWN.y);
     this.lastSafeX = SPAWN.x;
     this.lastSafeY = SPAWN.y;
@@ -222,7 +228,7 @@ export class World {
     this.player.hp = save.hp ?? this.player.maxHp;
     this.checkpoint = save.checkpoint ?? null;
     this.spPos = new Map(Object.entries(save.spPos ?? {}));
-    this.loadRoom(save.room[0], save.room[1]);
+    this.loadRoom(save.roomId);
     this.player.spawnAt(save.x, save.y);
     this.lastSafeX = save.x;
     this.lastSafeY = save.y;
@@ -235,7 +241,16 @@ export class World {
   private readSave(): SaveData | null {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
-      return raw ? (JSON.parse(raw) as SaveData) : null;
+      if (!raw) return null;
+      const save = JSON.parse(raw) as SaveData;
+      // 旧版存档（room 数组）或损坏档：roomId 缺失/指向不存在的房间 → 当无档处理（标题只能新开）
+      if (!save.roomId || !ROOMS[save.roomId] || typeof save.x !== "number" || typeof save.y !== "number") return null;
+      // 传送落点里指向不存在房间的条目剔除，避免传送地图出现死光标
+      for (const [k, v] of Object.entries(save.spPos ?? {})) {
+        if (!v?.roomId || !ROOMS[v.roomId]) delete save.spPos![k];
+      }
+      if (save.checkpoint && (!save.checkpoint.roomId || !ROOMS[save.checkpoint.roomId])) save.checkpoint = null;
+      return save;
     } catch {
       return null;
     }
@@ -245,7 +260,7 @@ export class World {
     if (this.ending || this.epilogue) return;
     try {
       const data: SaveData = {
-        room: [this.cx, this.cy],
+        roomId: this.roomId,
         x: Math.round(this.player.x),
         y: Math.round(this.player.y),
         items: [...this.items],
@@ -272,37 +287,38 @@ export class World {
 
   // ---- 房间装载 ----
 
-  private loadRoom(cx: number, cy: number): void {
-    const key = `${cx},${cy}`;
-    const def = ROOMS[key];
+  private loadRoom(id: string): void {
+    const def = ROOMS[id];
     if (!def) return;
     if (this.debug) {
       // 探针/调试：换房调用日志（谁在什么时候换了房），最新 60 条
       const via = (new Error().stack ?? "").split("\n")[2]?.trim().replace(/^at /, "") ?? "?";
-      this.debugLog.push(`t=${Math.round(this.time * 60)} loadRoom ${key} via ${via}`);
+      this.debugLog.push(`t=${Math.round(this.time * 60)} loadRoom ${id} via ${via}`);
       if (this.debugLog.length > 60) this.debugLog.shift();
     }
-    const fromKey = `${this.cx},${this.cy}`; // 茎所在的老房（此刻 cx/cy 还没换）
-    this.cx = cx;
-    this.cy = cy;
+    const fromId = this.roomId; // 茎所在的老房（此刻 roomId 还没换）
+    const pos = ROOM_POS[id] ?? { x: 0, y: 0 };
+    this.roomId = id;
+    this.cx = pos.x;
+    this.cy = pos.y;
     // 蔓豆茎停泊：离房不立刻消失——挂 BEAN_PARK_TIME 倒计时，**停泊房=离开前的那间**，
     // 期内回老房原样捞回；去别的房间看不见它，倒计时走完才真正丢弃
     if (this.beanStalk && !this.beanStalk.dead) {
-      this.parkedStalk = { stalk: this.beanStalk, roomKey: fromKey, timer: BEAN_PARK_TIME };
+      this.parkedStalk = { stalk: this.beanStalk, roomId: fromId, timer: BEAN_PARK_TIME };
     }
     this.beanStalk = null;
-    this.flags.add(`seen:${key}`); // 地图迷雾：到过的房间才上地图（随 flags 自动入存档）
+    this.flags.add(`seen:${id}`); // 地图迷雾：到过的房间才上地图（随 flags 自动入存档）
     this.arrivalGlow = 2.5; // 到达新房间：玩家灯短暂增强（辨认辅助），随时间衰减
     this.mapDirty = true; // 新到访的房间要烙进全局地图
     const entities: Entity[] = [];
     (def.objects ?? []).forEach((o: ObjDef, i: number) => {
-      const k = `${key}#${i}`;
-      const factory = ENTITY_TYPES[o.type] as (o: ObjDef, key: string, flags: ReadonlySet<string>, homeKey: string) => BaseEntity | BaseEntity[];
+      const k = `${id}#${i}`;
+      const factory = ENTITY_TYPES[o.type] as (o: ObjDef, key: string, flags: ReadonlySet<string>, homeId: string) => BaseEntity | BaseEntity[];
       if (!factory) return; // 未知类型（校验器兜底）：跳过不实例化
       // 两个键各司其职，别混用：
-      //   k = "房#序号" → 存档 flag 键（bud/vinebud/switch/plate/sp）
-      //   key = 网格键 → 载具 homeKey（电梯 endRoom 与它比较判断是否跨房，带序号会永远"跨房"）
-      const made = factory(o, k, this.flags, key);
+      //   k = "房id#序号" → 存档 flag 键（bud/vinebud/switch/plate/sp）
+      //   id = 房间 id（Rxx）→ 载具 homeId（电梯 endRoom 与它比较判断是否跨房）
+      const made = factory(o, k, this.flags, id);
       const list = Array.isArray(made) ? made : [made];
       for (const e of list) {
         entities.push(e);
@@ -329,7 +345,7 @@ export class World {
       }
     });
     // 回到停泊房：豆茎原样捞回（倒计时清零）
-    if (this.parkedStalk && this.parkedStalk.roomKey === key) {
+    if (this.parkedStalk && this.parkedStalk.roomId === id) {
       if (!this.parkedStalk.stalk.dead) {
         this.beanStalk = this.parkedStalk.stalk;
         entities.push(this.beanStalk);
@@ -337,19 +353,19 @@ export class World {
       this.parkedStalk = null;
     }
     this.room = {
-      cx,
-      cy,
+      cx: pos.x,
+      cy: pos.y,
       def,
       tiles: new Tilemap(32, 18, def.map),
       entities,
       solids: [],
-      decor: new RoomDecor(key, new Tilemap(32, 18, def.map), cy / 6),
+      decor: new RoomDecor(id, new Tilemap(32, 18, def.map), pos.y / 6),
     };
     // 挂在视野外的跨房载具：家房被加载就归位（同 id 的数据原件让位给它）
     if (this.detached.length) {
       const stay: PitcherElevator[] = [];
       for (const el of this.detached) {
-        if (el.homeKey === key) {
+        if (el.homeId === id) {
           this.room.entities = this.room.entities.filter(
             (x) => x === el || (x as { id?: unknown }).id !== el.id,
           );
@@ -366,21 +382,21 @@ export class World {
       for (const o of r.objects ?? []) {
         if (o.type !== "elevator") continue;
         if (!this.flags.has(`lift:${o.id}`)) continue;
-        const homeKey2 = `${r.x},${r.y}`;
-        const endKey = ROOM_KEY_BY_ID[o.end.room_id] ?? homeKey2;
-        if (key === homeKey2) {
+        const homeId = r.id;
+        const endId = ROOMS[o.end.room_id] ? o.end.room_id : homeId;
+        if (id === homeId) {
           this.room.entities = this.room.entities.filter((e) => (e as { id?: unknown }).id !== o.id);
           if (!this.detached.some((d) => d.id === o.id)) {
-            const el = new PitcherElevator(o.location, { ...o.end, room_id: endKey }, o, homeKey2, this.flags);
+            const el = new PitcherElevator(o.location, o.end, o, homeId, this.flags);
             el.detached = true;
             this.detached.push(el);
           }
-        } else if (key === endKey) {
+        } else if (id === endId) {
           const here = this.room.entities.find((e) => (e as { id?: unknown }).id === o.id) as (PitcherElevator | undefined);
           if (!here || !here.atFar) {
             this.room.entities = this.room.entities.filter((e) => (e as { id?: unknown }).id !== o.id);
             if (!this.detached.some((d) => d.id === o.id)) {
-              const el = new PitcherElevator(o.location, { ...o.end, room_id: endKey }, o, homeKey2, this.flags);
+              const el = new PitcherElevator(o.location, o.end, o, homeId, this.flags);
               this.room.entities.push(el);
             }
           }
@@ -471,7 +487,23 @@ export class World {
       const dur = this.fade.dur ?? FADE_T;
       this.fade.t += 1 / 60;
       if (this.fade.phase === "out" && this.fade.t >= dur) {
-        this.completeRoomSwap();
+        if (this.fade.swap) {
+          this.completeRoomSwap(); // 可能判定“已折返”而取消（fade 置空=无渐显，世界没变）
+        } else if (this.fade.travel) {
+          const t = this.fade.travel;
+          this.loadRoom(t.nid);
+          const spot = this.resolveEmbed(t.nx, t.ny);
+          this.player.x = spot.x;
+          this.player.y = spot.y;
+          this.entryX = spot.x;
+          this.entryY = spot.y;
+          this.lastSafeX = spot.x;
+          this.lastSafeY = spot.y;
+          this.snapCamera();
+          this.saveGame();
+          this.fade.phase = "in";
+          this.fade.t = 0;
+        }
       } else if (this.fade.phase === "in" && this.fade.t >= dur) {
         this.fade = null;
       }
@@ -737,6 +769,18 @@ export class World {
 
   solidAtPx(x: number, y: number): boolean {
     if (this.room.tiles.solidAtPx(x, y)) return true;
+    // 房界缝合：越界查询翻查邻房边缘瓦片。邻房是岩的地方房界就是墙（跳头不会钻进上房岩壁，
+    // 起跳擦过小洞口也不会被“吸”进上房——脚下有实心就该落回去），邻房开口才是通路。
+    // 只对越界查询生效，房内热路径零开销。
+    if (x < 0 || x >= ROOM_W || y < 0 || y >= ROOM_H) {
+      const nid = ROOM_ID_BY_POS[`${this.cx + (x < 0 ? -1 : x >= ROOM_W ? 1 : 0)},${this.cy + (y < 0 ? -1 : y >= ROOM_H ? 1 : 0)}`];
+      const tm = nid ? this.seamTiles(nid) : null;
+      if (tm) {
+        const nx = ((x % ROOM_W) + ROOM_W) % ROOM_W;
+        const ny = ((y % ROOM_H) + ROOM_H) % ROOM_H;
+        if (tm.solidAtPx(nx, ny)) return true;
+      }
+    }
     for (const r of this.room.solids) {
       if (r.oneWay) continue; // 单向平台不是墙：上升/横移/视线都可穿过
       if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return true;
@@ -744,10 +788,28 @@ export class World {
     return false;
   }
 
+  /** 邻房边缘瓦片缓存（按房间 id，瓦片静态，进程内缓存即可）。 */
+  private seamCache = new Map<string, Tilemap | null>();
+
+  private seamTiles(rid: string): Tilemap | null {
+    let tm = this.seamCache.get(rid);
+    if (tm === undefined) {
+      const def = ROOMS[rid];
+      tm = def ? new Tilemap(ROOM_COLS, ROOM_ROWS, def.map) : null;
+      this.seamCache.set(rid, tm);
+    }
+    return tm;
+  }
+
   /** 攀爬豆茎时的实心判定：与 solidAtPx 一致，但无视藤蔓墙——原生藤蔓与豆茎互不干扰，
    *  茎能长进去的地方人就攀得过去（垂藤本就非实心；这里豁免的是藤蔓墙/藤蔓荚）。 */
   climbSolidAtPx(x: number, y: number): boolean {
     if (this.room.tiles.solidAtPx(x, y)) return true;
+    // 攀爬同样受房界缝合约束（与 solidAtPx 一致）
+    if (x < 0 || x >= ROOM_W || y < 0 || y >= ROOM_H) {
+      const s = this.solidAtPx(x, y);
+      if (s) return true;
+    }
     for (const e of this.room.entities) {
       if (e instanceof VineBud) continue;
       const r = e.solidRect?.(this);
@@ -858,13 +920,12 @@ export class World {
       // 血尽：回满血回到最近激活的存档花；一株都没激活过=**直接回出生点房间**
       // （此前 checkpoint 为 null 时只传送坐标不换房——人会"在当前房间复活"）
       p.hp = p.maxHp;
-      const [scx, scy] = SPAWN.room.split(",").map(Number);
       const cp = this.checkpoint;
-      const room = cp ? cp.room : ([scx, scy] as [number, number]);
+      const rid = cp ? cp.roomId : SPAWN.room;
       const x = cp ? cp.x : SPAWN.x;
       const y = cp ? cp.y : SPAWN.y;
-      if (room[0] !== this.cx || room[1] !== this.cy) {
-        this.loadRoom(room[0], room[1]);
+      if (rid !== this.roomId) {
+        this.loadRoom(rid);
       }
       p.finishRespawnAt(x, y);
       this.entryX = x;
@@ -998,62 +1059,68 @@ export class World {
 
   // ---- 房间流转 ----
 
+  // ---- 房间流转（连续世界模型）----
+  // 房间不是独立世界，只是同一张大地图上的“视角”。角色中心点越过房界即把视角切到邻房，
+  // 坐标按房差整体平移：动量、骑乘相对关系、跳跃抛物线全部原样延续——
+  // 在两房交界处跳台阶与在房内跳台阶，行为与结果完全一致（用户定案：切视角，不是过门）。
+
   private checkTransitions(): void {
     const p = this.player;
-    let ncx = this.cx;
-    let ncy = this.cy;
-    // 水平转只改 x（换到对侧），y 保持；垂直转只改 y，x 保持——
-    // 速度与朝向一个都不动，跳进新房间就是同一个抛物线的延续
-    let nx = p.x;
-    let ny = p.y;
-    // 阈值要容得下一整个身位越出房间边缘，避免在边界上反复横跳
-    if (p.x < -4) {
-      ncx -= 1;
-      nx = ROOM_W - 6;
-    } else if (p.x > ROOM_W + 4) {
-      ncx += 1;
-      nx = 6;
+    // 中心点越界判定：无门槛、无吸附、不碰运动数据。fade 只是视觉眨眼，不锁几何。
+    const dx = p.x < 0 ? -1 : p.x > ROOM_W ? 1 : 0;
+    const dy = p.y < 0 ? -1 : p.y > ROOM_H ? 1 : 0;
+    if (!dx && !dy) {
+      this.fade = null; // 已折返回房内：撤销排队中的换房
+      return;
     }
-    if (p.y < -6) {
-      ncy -= 1;
-      ny = ROOM_H - 7;
-    } else if (p.y > ROOM_H + 6) {
-      ncy += 1;
-      ny = 7;
-    }
-    if ((ncx !== this.cx || ncy !== this.cy) && ROOMS[`${ncx},${ncy}`]) {
-      // 黑场眨眼：渐隐后瞬间换房。骑泡时**不做夹持**——泡泡正带着人越界上升，
-      // 夹回边界会让"人+泡"在渐隐里突然下坠一截（ riding 相对位置其实没断，纯属视觉惊吓）
-      this.fade = { t: 0, phase: "out", ncx, ncy, nx, ny };
-      const rider = this.riddenBubble();
-      if (!rider) {
-        p.x = Math.max(2, Math.min(ROOM_W - 2, p.x));
-        p.y = Math.max(4, Math.min(ROOM_H - 4, p.y));
-      }
-    } else if (ncx !== this.cx || ncy !== this.cy) {
-      // 没有相邻房间：夹回（数据校验保证不发生，双保险）
+    const from = ROOM_POS[this.roomId] ?? { x: 0, y: 0 };
+    const nid = ROOM_ID_BY_POS[`${from.x + dx},${from.y + dy}`];
+    if (!nid) {
+      // 世界边缘（没有邻房却开了洞）：钳回房内。校验保证边缘洞必有邻房，这里是双保险。
       p.x = Math.max(4, Math.min(ROOM_W - 4, p.x));
       p.y = Math.max(6, Math.min(ROOM_H - 6, p.y));
+      this.fade = null;
+      return;
     }
+    if (!this.fade) this.fade = { t: 0, phase: "out", swap: true };
   }
 
   /** 黑透瞬间执行的真实换房：位置/嵌体/骑泡/存档一次性落定。 */
+  /** 黑透瞬间：按当刻越界方向切视角。坐标只做房差平移（纯重定位）——
+   *  动量、抛物线、骑泡相对关系全部原样延续；若黑透前已折返回房内则取消换房。 */
   private completeRoomSwap(): void {
-    const f = this.fade!;
     const p = this.player;
-    const oldPx = p.x;
-    const oldPy = p.y;
-    const rider = this.riddenBubble();
-    this.loadRoom(f.ncx, f.ncy);
-    // 落点若嵌进实心（跳斜了、贴着洞口边），就近找空位——优先保持"不变的轴"
-    const spot = this.resolveEmbed(f.nx, f.ny);
-    p.x = spot.x;
-    p.y = spot.y;
-    // 骑着的泡泡跟人一起搬家：寿命/破裂倒计时都是同一个对象，自然不重置
+    const from = ROOM_POS[this.roomId] ?? { x: 0, y: 0 };
+    const dx = p.x < 0 ? -1 : p.x > ROOM_W ? 1 : 0;
+    const dy = p.y < 0 ? -1 : p.y > ROOM_H ? 1 : 0;
+    if (!dx && !dy) {
+      this.fade = null; // 已折返：世界没变，不切视角（黑透仅一瞬）
+      return;
+    }
+    const nid = ROOM_ID_BY_POS[`${from.x + dx},${from.y + dy}`];
+    if (!nid) {
+      this.fade = null; // 斜向越进不存在的房：不切（下一帧 checkTransitions 会钳回）
+      return;
+    }
+    const to = ROOM_POS[nid] ?? from;
+    const shiftX = (from.x - to.x) * ROOM_W;
+    const shiftY = (from.y - to.y) * ROOM_H;
+    const rider = this.riddenBubble(); // 先在旧房实体表里找到 riding 的泡泡
+    this.loadRoom(nid);
+    // 纯坐标平移：速度/朝向/骑乘一个都不碰——“换房”对物理零干预
+    p.x += shiftX;
+    p.y += shiftY;
+    // 骑着的泡泡跟人一起平移：寿命/破裂倒计时是同一个对象，自然不重置
     if (rider) {
-      rider.x += p.x - oldPx;
-      rider.y += p.y - oldPy;
+      rider.x += shiftX;
+      rider.y += shiftY;
       this.room.entities.push(rider);
+    }
+    // 唯一例外：泡泡等无视碰撞的状态把人带进了岩壁（连续世界里不该发生）——兜底就近安家
+    if (this.embeddedAt(p.x, p.y)) {
+      const spot = this.resolveEmbed(p.x, p.y);
+      p.x = spot.x;
+      p.y = spot.y;
     }
     this.entryX = p.x;
     this.entryY = p.y;
@@ -1061,8 +1128,10 @@ export class World {
     this.lastSafeY = p.y;
     this.snapCamera();
     this.saveGame();
-    f.phase = "in";
-    f.t = 0;
+    if (this.fade) {
+      this.fade.phase = "in";
+      this.fade.t = 0;
+    }
   }
 
   /** 玩家正骑着上升的泡泡（跨房时随身携带）。 */
@@ -1073,15 +1142,55 @@ export class World {
     return null;
   }
 
-  /** 落点嵌入实心时按"上、下、左、右"由近及远找第一个空位；找不到就原样返回。 */
+  /** 落点嵌入实心时全房扫最近可靠空位（连续世界下只兜“被无视碰撞的状态带进岩壁”这类极端）。 */
   private resolveEmbed(x: number, y: number): { x: number; y: number } {
     if (!this.embeddedAt(x, y)) return { x, y };
-    for (let r = 2; r <= 60; r += 2) {
-      for (const [dx, dy] of [[0, -r], [0, r], [-r, 0], [r, 0]] as const) {
-        if (!this.embeddedAt(x + dx, y + dy)) return { x: x + dx, y: y + dy };
+    return this.nearestLanding(x, y, Infinity, 2) ?? { x, y };
+  }
+
+  /**
+   * 全房逐格扫最近可靠落点（10px 步进）。候选分级（分级优先于距离）：
+   *   0=原地可站（脚下实心，含站在房界缝合的邻房岩顶上）
+   *   1=正下方扫到房底有实心（落下去也落在本房地板上）
+   *   2=正下方贯通无实心（落下去会穿出房界→立刻换回原房间）
+   * 分级罚分：1 级加 150px 等效距离；2 级只作嵌入扫描的最后兜底。
+   * maxD2 钳搜索半径（距离平方），maxTier 钳允许的最低分级——都达不到返回 null。
+   */
+  private nearestLanding(x: number, y: number, maxD2: number, maxTier: number): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestScore = Infinity;
+    const rows = ROOM_ROWS;
+    // 每列预计算“该行往下（含）是否还有实心”，避免候选循环里反复竖扫
+    const colGround: boolean[][] = [];
+    for (let col = 0; col < ROOM_COLS; col++) {
+      const below: boolean[] = new Array(rows).fill(false);
+      let any = false;
+      for (let row = rows - 1; row >= 0; row--) {
+        if (this.room.tiles.get(col, row) === Tile.Solid) any = true;
+        below[row] = any;
+      }
+      colGround[col] = below;
+    }
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < ROOM_COLS; col++) {
+        const px = col * TILE + 5;
+        const py = row * TILE + 5;
+        if (this.embeddedAt(px, py)) continue;
+        const dx = px - x, dy = py - y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > maxD2) continue;
+        let score: number;
+        if (this.solidAtPx(px, py + 6)) score = d2;
+        else if (colGround[col][row]) score = d2 + 22500;
+        else if (maxTier >= 2) score = d2 + 1e9; // 贯通格：只作嵌入扫描的最后兜底
+        else continue;
+        if (score < bestScore) {
+          bestScore = score;
+          best = { x: px, y: py };
+        }
       }
     }
-    return { x, y };
+    return best;
   }
 
   /** 幽魂碰身：掉 1 血、闪烁无敌 1s、原地击退——不再送回房间入口。血尽回存档花。 */
@@ -1131,7 +1240,7 @@ export class World {
     sp.attuned = true;
     this.flags.add(`sp:${sp.flagKey}`);
     this.player.hp = this.player.maxHp;
-    const pos = { room: [this.cx, this.cy] as [number, number], x: this.player.x, y: this.player.y };
+    const pos = { roomId: this.roomId, x: this.player.x, y: this.player.y };
     this.spPos.set(sp.flagKey, pos);
     this.checkpoint = pos;
     this.mapDirty = true; // 地图上的花点从暗变亮
@@ -1148,17 +1257,19 @@ export class World {
   private openTravel(): void {
     if (this.mapDirty) this.buildWorldMap();
     this.travelList = [...this.spPos.entries()]
-      .map(([key, v]) => ({
-        key,
-        cx: v.room[0],
-        cy: v.room[1],
-        x: v.x,
-        y: v.y,
-        mx: (v.room[0] - this.mapMinCx) * 32 + Math.floor(v.x / 10),
-        my: (v.room[1] - this.mapMinCy) * 18 + Math.floor(v.y / 10),
-      }))
-      .sort((a, b) => a.key.localeCompare(b.key));
-    const here = this.travelList.find((t) => t.cx === this.cx && t.cy === this.cy);
+      .map(([flagKey, v]) => {
+        const p = ROOM_POS[v.roomId] ?? { x: 0, y: 0 };
+        return {
+          flagKey,
+          id: v.roomId,
+          x: v.x,
+          y: v.y,
+          mx: (p.x - this.mapMinCx) * 32 + Math.floor(v.x / 10),
+          my: (p.y - this.mapMinCy) * 18 + Math.floor(v.y / 10),
+        };
+      })
+      .sort((a, b) => a.flagKey.localeCompare(b.flagKey));
+    const here = this.travelList.find((t) => t.id === this.roomId);
     this.travelCursor = here
       ? { x: here.mx, y: here.my }
       : { x: (this.cx - this.mapMinCx) * 32 + 16, y: (this.cy - this.mapMinCy) * 18 + 9 };
@@ -1243,10 +1354,10 @@ export class World {
     const screenY = (this.travelCursor.y - (baseY + this.mapPanY)) * z + ROOM_H / 2;
     const bandX0 = 48, bandX1 = ROOM_W - 48;
     const bandY0 = 32, bandY1 = ROOM_H - 32;
-    if (screenX > bandX1) this.travelPanTX -= (screenX - bandX1) / z;
-    if (screenX < bandX0) this.travelPanTX -= (screenX - bandX0) / z;
-    if (screenY > bandY1) this.travelPanTY -= (screenY - bandY1) / z;
-    if (screenY < bandY0) this.travelPanTY -= (screenY - bandY0) / z;
+    if (screenX > bandX1) this.travelPanTX += (screenX - bandX1) / z;
+    if (screenX < bandX0) this.travelPanTX += (screenX - bandX0) / z;
+    if (screenY > bandY1) this.travelPanTY += (screenY - bandY1) / z;
+    if (screenY < bandY0) this.travelPanTY += (screenY - bandY0) / z;
     const vw = ROOM_W / this.mapZoom;
     const vh = ROOM_H / this.mapZoom;
     const worldW = this.mapCols * 32;
@@ -1274,7 +1385,7 @@ export class World {
       this.mapOpen = false;
       this.useBuf = 0;
       // 复用房间黑场眨眼：传送用更从容的过场（0.32s 单程），黑透瞬间落进目标花的激活位置
-      this.fade = { t: 0, phase: "out", ncx: t.cx, ncy: t.cy, nx: t.x, ny: t.y, dur: 0.32 };
+      this.fade = { t: 0, phase: "out", dur: 0.32, travel: { nid: t.id, nx: t.x, ny: t.y } };
       audio.doorOpen();
     }
   }
@@ -1384,9 +1495,9 @@ export class World {
     }
     // 空笼跨房挂载的载具：坐标在其所属房间系里，按房间差平移绘制（跨界时恰好出入画面边缘）
     for (const el of this.detached) {
-      const [hx, hy] = el.homeKey.split(",").map(Number);
+      const hp = ROOM_POS[el.homeId] ?? { x: 0, y: 0 };
       ctx.save();
-      ctx.translate((hx - this.cx) * ROOM_W, (hy - this.cy) * ROOM_H);
+      ctx.translate((hp.x - this.cx) * ROOM_W, (hp.y - this.cy) * ROOM_H);
       drawEnt(el);
       ctx.restore();
     }
@@ -1499,9 +1610,9 @@ export class World {
 
   /** 把所有到访过的房间烙进一张连续的全局地形图（1px/格，按房增量重画）。 */
   private buildWorldMap(): void {
-    const keys = Object.keys(ROOMS);
-    const cxs = keys.map((k) => Number(k.split(",")[0]));
-    const cys = keys.map((k) => Number(k.split(",")[1]));
+    const rs = Object.values(ROOMS).map((r) => ROOM_POS[r.id] ?? { x: 0, y: 0 });
+    const cxs = rs.map((p) => p.x);
+    const cys = rs.map((p) => p.y);
     this.mapMinCx = Math.min(...cxs);
     this.mapMinCy = Math.min(...cys);
     this.mapCols = Math.max(...cxs) - this.mapMinCx + 1;
@@ -1511,12 +1622,12 @@ export class World {
     c.height = this.mapRows * 18;
     const g = c.getContext("2d")!;
     g.clearRect(0, 0, c.width, c.height);
-    for (const [key, def] of Object.entries(ROOMS)) {
-      if (!this.flags.has(`seen:${key}`)) continue; // 没去过的地方是黑的
-      const [cx, cy] = key.split(",").map(Number);
-      const ox = (cx - this.mapMinCx) * 32;
-      const oy = (cy - this.mapMinCy) * 18;
-      const pal = paletteFor(Math.min(1, Math.max(0, cy / 6)));
+    for (const [rid, def] of Object.entries(ROOMS)) {
+      if (!this.flags.has(`seen:${rid}`)) continue; // 没去过的地方是黑的
+      const p = ROOM_POS[rid] ?? { x: 0, y: 0 };
+      const ox = (p.x - this.mapMinCx) * 32;
+      const oy = (p.y - this.mapMinCy) * 18;
+      const pal = paletteFor(Math.min(1, Math.max(0, p.y / 6)));
       for (let ty = 0; ty < 18; ty++) {
         for (let tx = 0; tx < 32; tx++) {
           const ch = def.map[ty][tx];
@@ -1544,7 +1655,7 @@ export class World {
         if (o.type !== "savepoint") return;
         const mx = ox + o.location.x;
         const my = oy + o.location.y;
-        if (this.flags.has(`sp:${key}#${i}`)) {
+        if (this.flags.has(`sp:${rid}#${i}`)) {
           g.fillStyle = "#7fe8c0";
           g.fillRect(mx - 1, my - 1, 3, 3);
           g.fillStyle = "#eafff4";
@@ -1624,7 +1735,7 @@ export class World {
         const pulse = 0.55 + Math.sin(this.time * 7) * 0.45;
         ctx.strokeStyle = `rgba(174, 240, 216, ${pulse.toFixed(2)})`;
         ctx.strokeRect(sx - 4.5, sy - 4.5, 9, 9);
-        drawText(ctx, `GO? ${t.cx},${t.cy}`, sx + 6, sy - 5, 1, "#aef0d8");
+        drawText(ctx, `GO? ${t.id}`, sx + 6, sy - 5, 1, "#aef0d8");
       }
     }
     drawTextCentered(ctx, "MAP", 160, 8, 1, "#5a7268");
@@ -1956,10 +2067,9 @@ export class World {
   }
 
   /** 电梯等载具跨房投递：直接落到目标房间坐标（作为乘坐的一部分，无黑场）。 */
-  relocatePlayer(roomKey: string, x: number, y: number): void {
-    if (!ROOMS[roomKey]) return;
-    const [rcx, rcy] = roomKey.split(",").map(Number);
-    this.loadRoom(rcx, rcy);
+  relocatePlayer(roomId: string, x: number, y: number): void {
+    if (!ROOMS[roomId]) return;
+    this.loadRoom(roomId);
     const spot = this.resolveEmbed(x, y);
     this.player.x = spot.x;
     this.player.y = spot.y;
@@ -1980,14 +2090,13 @@ export class World {
 
   handoffElevator(el: PitcherElevator, endRoom: string, shift: { x: number; y: number }): void {
     if (this.debug) this.debugLog.push(`t=${Math.round(this.time * 60)} handoff→${endRoom} carrying=${el.carrying}`);
-    const [rcx, rcy] = endRoom.split(",").map(Number);
-    if (!ROOMS[`${rcx},${rcy}`]) return;
-    el.adopt(endRoom, shift, endRoom !== el.originKey ? true : false);
+    if (!ROOMS[endRoom]) return;
+    el.adopt(endRoom, shift, endRoom !== el.originId ? true : false);
     if (el.carrying) {
       // 载客：世界（房间/镜头/乘客坐标）跟着笼子走
       this.player.x -= shift.x;
       this.player.y -= shift.y;
-      this.loadRoom(rcx, rcy);
+      this.loadRoom(endRoom);
       // 回巢时 loadRoom 会从数据重建出同一台电梯的"原件"，和 adopt 回来的这只重叠成两只
       // （新实例 prevTrig=false，若触发仍有效会立刻幽灵发车）——摘掉同 id 的其他电梯，只留这只。
       this.room.entities = this.room.entities.filter(
@@ -2006,16 +2115,16 @@ export class World {
     // 否则摘下挂到 detached——在玩家视野外照常模拟（飞行/到站/返程计时），家房加载时自动归位。
     this.room.entities = this.room.entities.filter((e) => e !== el);
     this.detached = this.detached.filter((e) => e !== el);
-    el.detached = !(rcx === this.cx && rcy === this.cy);
+    const pos = ROOM_POS[endRoom] ?? { x: 0, y: 0 };
+    el.detached = !(pos.x === this.cx && pos.y === this.cy);
     if (el.detached) this.detached.push(el);
     else this.room.entities.push(el);
   }
 
-  /** 调试深链（编辑器「运行游戏」用）：直达任意房间。 */
-  debugGoto(key: string): void {
-    if (!ROOMS[key]) return;
-    const [cx, cy] = key.split(",").map(Number);
-    this.loadRoom(cx, cy);
+  /** 调试深链（编辑器「运行游戏」用）：直达任意房间（房间 id，Rxx）。 */
+  debugGoto(id: string): void {
+    if (!ROOMS[id]) return;
+    this.loadRoom(id);
     const spot = this.findSafeSpot();
     this.player.spawnAt(spot.x, spot.y);
     this.lastSafeX = spot.x;

@@ -30,7 +30,7 @@ async function boot(url) {
 // ---- 场景 1：电梯载客单程（(1,4) 同房竖井电梯 K25B6Y：进房被吞→到站→停住不回航）----
 {
   // 该梯 persist flag 若在（上次运行遗留），清掉重载恢复原位
-  await page.goto(`${BASE}/?debug=1&room=1,4`);
+  await page.goto(`${BASE}/?debug=1&room=R09`);
   await page.waitForFunction(() => !!window.__pw, null, { timeout: 20000 });
   await page.evaluate(() => {
     const w = window.__pw.world;
@@ -95,7 +95,7 @@ async function boot(url) {
 
 // ---- 场景 2：开关→电梯单程无客（(2,0) reset=1 开关 → 电梯 UYDJ26）----
 {
-  await boot(`${BASE}/?debug=1&room=2,0`);
+  await boot(`${BASE}/?debug=1&room=R12`);
   const s2 = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const w = window.__pw.world;
@@ -126,11 +126,11 @@ async function boot(url) {
 
 // ---- 场景 3：存档花激活 + 传送光标（含按住连发语义）----
 {
-  await boot(`${BASE}/?debug=1&room=1,0`);
+  await boot(`${BASE}/?debug=1&room=R04`);
   const s3 = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const w = window.__pw.world;
-    const sp = w.room.entities.find((e) => e.flagKey !== undefined && String(e.flagKey).startsWith("1,0"));
+    const sp = w.room.entities.find((e) => e.flagKey !== undefined && String(e.flagKey).startsWith("R04#"));
     if (!sp) return { found: false };
     // 站到花旁，按使用键激活（走 useBuf 路径）
     w.player.spawnAt(sp.x + 4, sp.y - 2);
@@ -171,7 +171,7 @@ async function boot(url) {
 
 // ---- 场景 3.5：无存档血尽 → 回出生点房间（不是当前房间）----
 {
-  await boot(`${BASE}/?debug=1&room=1,6`);
+  await boot(`${BASE}/?debug=1&room=R11`);
   const r35 = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const w = window.__pw.world;

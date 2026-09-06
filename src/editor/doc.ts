@@ -1,20 +1,22 @@
 // 编辑器文档：MAP_LIST 的内存深拷贝 + 撤销/重做 + 校验。
 // 多地图：maps[] 是全部地图；editMapId 指正在编辑的图；gameMapId 指游戏采用（GAME_MAP_ID）的图。
-// rooms/keyOrder 两个 getter 永远指向「正在编辑的图」，编辑器其余代码照旧只管一间间房间。
+// rooms/idOrder 两个 getter 永远指向「正在编辑的图」，编辑器其余代码照旧只管一间间房间（id=Rxx 是唯一房间标识）。
 import { GAME_MAP_ID, MAP_LIST } from "./dataBridge";
 import { serializeMap } from "./exporter";
 import { propByIdDoc } from "./mats";
 import { num, type ObjRec } from "./palette";
 
 export interface LightRec { x: number; y: number; r: number }
-export interface RoomRec { id: string; map: string[]; objects: ObjRec[]; lights?: LightRec[]; moss?: string }
-/** 出生点/地图元数据里的 room 是房间 id（"R05"），不是网格键。 */
+export interface RoomRec { id: string; x: number; y: number; map: string[]; objects: ObjRec[]; lights?: LightRec[]; moss?: string }
+/** 出生点/地图元数据里的 room 是房间 id（"R05"），不是网格坐标。 */
 export interface SpawnRec { room: string; x: number; y: number }
 export interface MapRec {
   id: string;
   name: string;
   spawn: SpawnRec;
-  keyOrder: string[];
+  /** 房间 id 顺序（新建序），下拉/遍历用它。 */
+  idOrder: string[];
+  /** 房间 id（"R05"）→ 房间记录。网格坐标在 rec.x/rec.y 上。 */
   rooms: Record<string, RoomRec>;
 }
 export interface Issue {
@@ -49,8 +51,8 @@ export class EditorDoc {
   curMap(): MapRec {
     return this.maps.find((m) => m.id === this.editMapId) ?? this.maps.find((m) => m.id === this.gameMapId) ?? this.maps[0];
   }
-  get keyOrder(): string[] {
-    return this.curMap().keyOrder;
+  get idOrder(): string[] {
+    return this.curMap().idOrder;
   }
   get rooms(): Record<string, RoomRec> {
     return this.curMap().rooms;
@@ -89,12 +91,13 @@ export class EditorDoc {
   }
 
   private toRec(def: { id: string; name: string; spawn: SpawnRec; rooms: { id: string; x: number; y: number; map: string[]; objects?: ObjRec[]; lights?: LightRec[]; moss?: string }[] }): MapRec {
-    const rec: MapRec = { id: def.id, name: def.name, spawn: { ...def.spawn }, keyOrder: [], rooms: {} };
+    const rec: MapRec = { id: def.id, name: def.name, spawn: { ...def.spawn }, idOrder: [], rooms: {} };
     for (const r of def.rooms) {
-      const key = `${r.x},${r.y}`;
-      rec.keyOrder.push(key);
-      rec.rooms[key] = {
+      rec.idOrder.push(r.id);
+      rec.rooms[r.id] = {
         id: r.id,
+        x: r.x,
+        y: r.y,
         map: [...r.map],
         objects: (r.objects ?? []).map((o) => ({ ...o }) as ObjRec),
         lights: r.lights?.map((l) => ({ ...l })),
@@ -195,11 +198,11 @@ export class EditorDoc {
   addMap(): string {
     const id = this.nextMapId();
     this.mutate(() => {
-      const m: MapRec = { id, name: `新地图 ${id}`, spawn: { room: "", x: 160, y: 90 }, keyOrder: [], rooms: {} };
+      const m: MapRec = { id, name: `新地图 ${id}`, spawn: { room: "", x: 160, y: 90 }, idOrder: [], rooms: {} };
       this.maps.push(m);
       this.editMapId = id;
       this.buildStarterRoom(m);
-      m.spawn.room = m.rooms[m.keyOrder[0]].id;
+      m.spawn.room = m.rooms[m.idOrder[0]].id;
     });
     return id;
   }
@@ -244,11 +247,9 @@ export class EditorDoc {
 
   private buildStarterRoom(m: MapRec): void {
     const border = "#".repeat(COLS);
-    const key = "0,0";
-    if (!m.rooms[key]) {
-      m.keyOrder.push(key);
-      m.rooms[key] = { id: this.nextRoomId(m), map: Array.from({ length: ROWS }, () => border), objects: [] };
-    }
+    const rid = this.nextRoomId(m);
+    m.idOrder.push(rid);
+    m.rooms[rid] = { id: rid, x: 0, y: 0, map: Array.from({ length: ROWS }, () => border), objects: [] };
   }
 
   private nextRoomId(m: MapRec): string {
@@ -258,22 +259,23 @@ export class EditorDoc {
     return `R${String(n).padStart(2, "0")}`;
   }
 
-  private keyOfRoomId(m: MapRec, roomId: string): string | null {
-    for (const k of m.keyOrder) if (m.rooms[k]?.id === roomId) return k;
-    return null;
+  /** 本图内 网格坐标 → 房间 id（邻接判定用）。 */
+  roomAt(m: MapRec, x: number, y: number): RoomRec | undefined {
+    for (const r of Object.values(m.rooms)) if (r.x === x && r.y === y) return r;
+    return undefined;
   }
 
   // ---- 房间级操作（都落在正在编辑的地图上） ----
 
-  room(key: string): RoomRec | undefined {
-    return this.rooms[key];
+  room(id: string): RoomRec | undefined {
+    return this.rooms[id];
   }
 
-  /** 出生点（room 换算成网格键，渲染/标记直接用；id 已失效时兜底第一间房）。 */
+  /** 出生点（room 即房间 id；id 已失效时兜底第一间房）。 */
   spawn(): SpawnRec & { room: string } {
     const m = this.curMap();
-    const key = this.keyOfRoomId(m, m.spawn.room) ?? m.keyOrder[0] ?? "0,0";
-    return { room: key, x: m.spawn.x, y: m.spawn.y };
+    const room = m.rooms[m.spawn.room] ? m.spawn.room : m.idOrder[0] ?? "";
+    return { room, x: m.spawn.x, y: m.spawn.y };
   }
 
   /** 出生点原始数据（room = 房间 id，导出/编辑用）。 */
@@ -281,12 +283,11 @@ export class EditorDoc {
     return { ...this.curMap().spawn };
   }
 
-  setSpawnRoom(key: string): void {
+  setSpawnRoom(id: string): void {
     const m = this.curMap();
-    const rid = m.rooms[key]?.id;
-    if (!rid) return;
+    if (!m.rooms[id]) return;
     this.mutate(() => {
-      m.spawn.room = rid;
+      m.spawn.room = id;
     });
   }
 
@@ -298,30 +299,25 @@ export class EditorDoc {
     });
   }
 
-  isValidKey(key: string): boolean {
-    if (!/^-?\d+,-?\d+$/.test(key)) return false;
-    const [cx, cy] = key.split(",").map(Number);
-    return Number.isFinite(cx) && Number.isFinite(cy);
-  }
-
-  /** 新建房间：封闭边框 + 全空气（自己开洞）。已存在返回 false。 */
-  addRoom(key: string): boolean {
+  /** 新建房间：网格坐标 (x,y) 处放一间封闭边框+全空气的新房，自动分配 Rxx id。成功返回 id。 */
+  addRoom(x: number, y: number): string | null {
     const m = this.curMap();
-    if (m.rooms[key] || !this.isValidKey(key)) return false;
+    if (this.roomAt(m, x, y)) return null;
+    const rid = this.nextRoomId(m);
     this.mutate(() => {
       const border = "#".repeat(COLS); // 四边全封闭（自己开洞）——首末行也必须是实心
-      m.keyOrder.push(key);
-      m.rooms[key] = { id: this.nextRoomId(m), map: Array.from({ length: ROWS }, () => border), objects: [] };
+      m.idOrder.push(rid);
+      m.rooms[rid] = { id: rid, x, y, map: Array.from({ length: ROWS }, () => border), objects: [] };
     });
-    return true;
+    return rid;
   }
 
-  deleteRoom(key: string): void {
+  deleteRoom(id: string): void {
     const m = this.curMap();
-    if (!m.rooms[key]) return;
+    if (!m.rooms[id]) return;
     this.mutate(() => {
-      delete m.rooms[key];
-      m.keyOrder = m.keyOrder.filter((k) => k !== key);
+      delete m.rooms[id];
+      m.idOrder = m.idOrder.filter((k) => k !== id);
     });
   }
 
@@ -349,11 +345,11 @@ export class EditorDoc {
       d.spawn && typeof d.spawn.room === "string"
         ? { room: d.spawn.room, x: Number(d.spawn.x) || 0, y: Number(d.spawn.y) || 0 }
         : { room: "", x: 160, y: 90 };
-    const rec: MapRec = { id, name, spawn, keyOrder: [], rooms: {} };
+    const rec: MapRec = { id, name, spawn, idOrder: [], rooms: {} };
     let dropped = 0;
     for (const raw of d.rooms) {
       const r = raw as { id?: unknown; x?: unknown; y?: unknown; map?: unknown; objects?: unknown; lights?: unknown; moss?: unknown };
-      if (typeof r.id !== "string" || !Array.isArray(r.map)) {
+      if (typeof r.id !== "string" || !/^[A-Z0-9]{3}$/.test(r.id) || !Array.isArray(r.map)) {
         dropped++;
         continue;
       }
@@ -363,19 +359,20 @@ export class EditorDoc {
         dropped++;
         continue;
       }
-      const key = `${x},${y}`;
-      if (rec.rooms[key]) dropped++;
-      rec.keyOrder.push(key);
-      rec.rooms[key] = {
+      if (rec.rooms[r.id]) dropped++; // id 撞车：后者丢弃
+      rec.idOrder.push(r.id);
+      rec.rooms[r.id] = {
         id: r.id,
+        x,
+        y,
         map: (r.map as unknown[]).map(String),
         objects: Array.isArray(r.objects) ? (r.objects as ObjRec[]) : [],
         lights: Array.isArray(r.lights) ? (r.lights as LightRec[]) : undefined,
         moss: typeof r.moss === "string" ? r.moss : undefined,
       };
     }
-    if (!rec.keyOrder.length) return { ok: false, error: "地图里没有可用房间" };
-    if (!this.keyOfRoomId(rec, spawn.room)) spawn.room = rec.rooms[rec.keyOrder[0]].id;
+    if (!rec.idOrder.length) return { ok: false, error: "地图里没有可用房间" };
+    if (!rec.rooms[spawn.room]) spawn.room = rec.rooms[rec.idOrder[0]].id;
     this.mutate(() => {
       this.maps.push(rec);
       this.editMapId = id;
@@ -405,7 +402,7 @@ export class EditorDoc {
       if (!/^[A-Z0-9]{2,4}$/.test(m.id)) push("error", `地图 id "${m.id}" 非法（2~4 位大写字母/数字）`);
       else if (seenMapIds.has(m.id)) push("error", `地图 id ${m.id} 重复`);
       else seenMapIds.add(m.id);
-      if (!this.keyOfRoomId(m, m.spawn.room)) {
+      if (!m.rooms[m.spawn.room]) {
         push("error", `地图 ${m.id} 的出生点房间 "${m.spawn.room}" 不存在`);
       } else if (m.spawn.x < 0 || m.spawn.x >= COLS * 10 || m.spawn.y < 0 || m.spawn.y >= ROWS * 10) {
         push("warn", `地图 ${m.id} 的出生点像素越界`);
@@ -432,7 +429,8 @@ export class EditorDoc {
         bottom: this.openings(def.map, "bottom"),
       };
 
-      const [cx, cy] = key.split(",").map(Number);
+      const cx = def.x;
+      const cy = def.y;
       const edges: [keyof typeof byEdge, number, number][] = [
         ["left", -1, 0],
         ["right", 1, 0],
@@ -440,17 +438,14 @@ export class EditorDoc {
         ["bottom", 0, 1],
       ];
       for (const [edge, dx, dy] of edges) {
-        const nKey = `${cx + dx},${cy + dy}`;
-        const nb = this.rooms[nKey];
+        const nb = this.roomAt(this.curMap(), cx + dx, cy + dy);
         const mine = byEdge[edge];
         if (!nb) {
-          if (mine.length) push("error", `${edge} 边有洞口但没有相邻房间 ${nKey}，世界会漏`, key);
+          if (mine.length) push("error", `${edge} 边有洞口但没有相邻房间，世界会漏`, key);
           continue;
         }
-        const theirs = this.openings(nb.map, edge === "left" ? "right" : edge === "right" ? "left" : edge === "top" ? "bottom" : "top");
-        if (mine.join(",") !== theirs.join(",")) {
-          push("error", `${edge} 边洞口与 ${nKey} 不配对`, key);
-        }
+        // 洞口不要求两房配对：错位洞口（如右上阶梯跨房）是合法设计，
+        // 游戏侧有房界缝合+落点择址兜底，是否连通由设计者自己把关
       }
 
       for (const o of def.objects) {
@@ -506,35 +501,37 @@ export class EditorDoc {
       }
     }
 
-    // 房间 id：非空、3 位、本图内唯一；物件坐标的 room_id 必须能解析到本图某个房间
-    const seenIds = new Map<string, string>();
-    for (const k of this.keyOrder) {
-      const rid = this.rooms[k]?.id ?? "";
-      if (!/^[A-Z0-9]{3}$/.test(rid)) push("error", `房间 ${k} 的 id 非法（应为 3 位大写字母/数字，现为 "${rid}"）`, k);
-      else if (seenIds.has(rid)) push("error", `房间 id ${rid} 重复（${seenIds.get(rid)} 与 ${k}）`, k);
-      else seenIds.set(rid, k);
+    // 房间 id：3 位大写字母/数字（id 即房间键，Record 结构保证本图内唯一）；
+    // 网格坐标：每格最多一间房（两间挤同一格是世界数据错误）。
+    // 物件坐标的 room_id 必须能解析到本图某个房间。
+    const seenIds = new Set<string>();
+    for (const [rid, r] of Object.entries(this.rooms)) {
+      if (!/^[A-Z0-9]{3}$/.test(rid)) push("error", `房间 id "${rid}" 非法（应为 3 位大写字母/数字）`, rid);
+      else seenIds.add(rid);
+      const twin = this.roomAt(this.curMap(), r.x, r.y);
+      if (twin && twin.id !== rid) push("error", `房间 ${rid} 与 ${twin.id} 占同一网格 (${r.x},${r.y})`, rid);
     }
-    for (const k of this.keyOrder) {
-      for (const o of this.rooms[k]?.objects ?? []) {
+    const idList = [...seenIds];
+    for (const rid of Object.keys(this.rooms)) {
+      for (const o of this.rooms[rid]?.objects ?? []) {
         for (const pk of ["location", "end"]) {
           const v = o[pk] as { room_id?: unknown } | undefined;
           if (pk === "end" && !v) continue; // end 只有电梯/睡莲有
-          const rid = typeof v?.room_id === "string" ? v.room_id : "";
-          if (!rid) push("error", `${o.type} 的 ${pk}.room_id 为空`, k, loc(o).x, loc(o).y);
-          else if (!seenIds.has(rid)) {
-            push("error", `${o.type} 的 ${pk}.room_id "${rid}" 不存在（房间 id: ${[...seenIds.keys()].join(" ")}）`, k, loc(o).x, loc(o).y);
+          const oid = typeof v?.room_id === "string" ? v.room_id : "";
+          if (!oid) push("error", `${o.type} 的 ${pk}.room_id 为空`, rid, loc(o).x, loc(o).y);
+          else if (!seenIds.has(oid)) {
+            push("error", `${o.type} 的 ${pk}.room_id "${oid}" 不存在（房间 id: ${idList.join(" ")}）`, rid, loc(o).x, loc(o).y);
           }
         }
       }
     }
-    // location.room_id 应指向物件所在房间：游戏按列表+网格键定位，room_id 是数据自描述——填了别的房 id 说明数据乱了
-    for (const k of this.keyOrder) {
-      const def = this.rooms[k];
-      const rid = def?.id ?? "";
+    // location.room_id 应指向物件所在房间：room_id 是数据自描述——填了别的房 id 说明数据乱了
+    for (const rid of Object.keys(this.rooms)) {
+      const def = this.rooms[rid];
       for (const o of def?.objects ?? []) {
         const v = (o as { location?: { room_id?: unknown } }).location;
         const lr = typeof v?.room_id === "string" ? v.room_id : "";
-        if (lr && lr !== rid) push("warn", `${o.type} 的 location.room_id "${lr}" 不是本房 id "${rid}"`, k, loc(o).x, loc(o).y);
+        if (lr && lr !== rid) push("warn", `${o.type} 的 location.room_id "${lr}" 不是本房 id "${rid}"`, rid, loc(o).x, loc(o).y);
       }
     }
 

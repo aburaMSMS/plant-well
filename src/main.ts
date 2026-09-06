@@ -11,7 +11,7 @@ const input = new Input();
 input.attach(window);
 
 const debug = new URLSearchParams(location.search).get("debug") === "1";
-// 编辑器深链：/?debug=1&room=col,row 直达指定房间（仅 debug 生效）
+// 编辑器深链：/?debug=1&room=R12 直达指定房间（房间 id；仅 debug 生效）
 const debugRoom = debug ? new URLSearchParams(location.search).get("room") : null;
 if (debug) {
   // 供自动化测试探查内部状态

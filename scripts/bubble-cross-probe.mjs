@@ -5,7 +5,7 @@ const BASE = "http://localhost:5199";
 const browser = await chromium.launch({ channel: "msedge" });
 const page = await browser.newPage();
 page.on("pageerror", (e) => console.log("PAGEERR", String(e).slice(0, 200)));
-await page.goto(`${BASE}/?debug=1&room=1,4`);
+await page.goto(`${BASE}/?debug=1&room=R09`);
 await page.waitForFunction(() => !!window.__pw, null, { timeout: 20000 });
 await page.keyboard.press("Enter");
 await page.waitForTimeout(1100);

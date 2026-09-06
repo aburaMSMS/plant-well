@@ -24,7 +24,7 @@ export interface UIState {
   marquee: { x0: number; y0: number; x1: number; y1: number } | null;
   /** 框选集合：物件定位键 "房键#序号"。 */
   multiSel: Set<string>;
-  placeCtx: { nextDoorId: string; nextSeedId: number; propId: string; roomKey: string; roomId: string };
+  placeCtx: { nextDoorId: string; nextSeedId: number; propId: string; roomId: string };
 }
 
 const ZOOMS = [10, 12, 14, 16, 18, 20, 24, 28, 32];
@@ -100,19 +100,17 @@ export class EditorRenderer {
     this.camY += (my * (this.ts - before)) / before;
   }
 
-  /** 屏幕坐标 → 世界格 { roomKey, x, y }（命中 doc 里哪个房间；画布范围外返回 null）。 */
-  toWorldTile(doc: EditorDoc, mx: number, my: number): { key: string; x: number; y: number } | null {
+  /** 屏幕坐标 → 世界格 { roomId, x, y }（命中 doc 里哪个房间；画布范围外返回 null）。 */
+  toWorldTile(doc: EditorDoc, mx: number, my: number): { roomId: string; x: number; y: number } | null {
     const wp = this.s2w(mx, my);
     const rx = Math.floor(wp.x / (ROOM_COLS * this.ts));
     const ry = Math.floor(wp.y / (ROOM_ROWS * this.ts));
-    const keys = doc.keyOrder;
-    for (const k of keys) {
-      const [cx, cy] = k.split(",").map(Number);
-      if (cx === rx && cy === ry) {
-        const x = Math.floor((wp.x - rx * ROOM_COLS * this.ts) / this.ts);
-        const y = Math.floor((wp.y - ry * ROOM_ROWS * this.ts) / this.ts);
-        if (x >= 0 && y >= 0 && x < ROOM_COLS && y < ROOM_ROWS) return { key: k, x, y };
-      }
+    for (const k of doc.idOrder) {
+      const r = doc.rooms[k];
+      if (!r || r.x !== rx || r.y !== ry) continue;
+      const x = Math.floor((wp.x - rx * ROOM_COLS * this.ts) / this.ts);
+      const y = Math.floor((wp.y - ry * ROOM_ROWS * this.ts) / this.ts);
+      if (x >= 0 && y >= 0 && x < ROOM_COLS && y < ROOM_ROWS) return { roomId: k, x, y };
     }
     return null;
   }
@@ -141,16 +139,17 @@ export class EditorRenderer {
     const r0 = Math.floor(this.camY / (ROOM_ROWS * this.ts));
     const c1 = Math.floor((this.camX + w) / (ROOM_COLS * this.ts));
     const r1 = Math.floor((this.camY + h) / (ROOM_ROWS * this.ts));
-    const keySet = new Set(doc.keyOrder);
-    const [curCx, curCy] = ui.key.split(",").map(Number);
+    // 网格坐标 → 房间 id：房间数据以 id 为键，坐标在 rec.x/rec.y 上
+    const byPos = new Map<string, string>();
+    for (const [rid, r] of Object.entries(doc.rooms)) byPos.set(`${r.x},${r.y}`, rid);
 
     // 先画非当前房（暗），再画当前房（亮）盖在上面
     const roomsToDraw: { key: string; cx: number; cy: number; active: boolean }[] = [];
     for (let cx = c0; cx <= c1; cx++) {
       for (let cy = r0; cy <= r1; cy++) {
-        if (!keySet.has(`${cx},${cy}`)) continue;
-        const active = cx === curCx && cy === curCy;
-        roomsToDraw.push({ key: `${cx},${cy}`, cx, cy, active });
+        const rid = byPos.get(`${cx},${cy}`);
+        if (!rid) continue;
+        roomsToDraw.push({ key: rid, cx, cy, active: rid === ui.key });
       }
     }
     roomsToDraw.sort((a, b) => Number(a.active) - Number(b.active));
@@ -166,7 +165,7 @@ export class EditorRenderer {
       this.drawEdgeBadges(c, doc, rr.key);
       r.objects.forEach((o, i) => {
         const picked = rr.active && (i === ui.selection || ui.multiSel.has(`${rr.key}#${i}`));
-        this.drawObj(c, o, picked, t, i, { doc, roomKey: rr.key });
+        this.drawObj(c, o, picked, t, i, { doc, roomId: rr.key });
       });
       this.drawSpawn(c, doc, rr.key);
       if (rr.active) {
@@ -225,8 +224,7 @@ export class EditorRenderer {
       if (ui.tool === "place" && isHoverRoom && ui.palSel?.kind === "obj") {
         const ghost = defaultsFor(objSpec(ui.placeType), ui.hover!.x, ui.hover!.y, {
           ...ui.placeCtx,
-          roomKey: rr.key,
-          roomId: doc.rooms[rr.key]?.id ?? rr.key,
+          roomId: rr.key,
         });
         c.globalAlpha = 0.55;
         this.drawObj(c, ghost, false, t);
@@ -311,11 +309,10 @@ export class EditorRenderer {
     c.setLineDash([]);
   }
 
-  /** 边缘洞口配对标记：绿=两侧都开，红=不配对或无邻室（会漏）。 */
+  /** 边缘洞口标记：绿=贯通到邻房洞口，灰=被邻房岩壁封住（等于墙，合法），红=无邻房（会漏出世界）。 */
   private drawEdgeBadges(c: CanvasRenderingContext2D, doc: EditorDoc, key: string): void {
     const room = doc.rooms[key];
     if (!room) return;
-    const [cx, cy] = key.split(",").map(Number);
     const ts = this.ts;
     const wpx = ROOM_COLS * ts;
     const hpx = ROOM_ROWS * ts;
@@ -326,14 +323,14 @@ export class EditorRenderer {
       ["bottom", 0, 1],
     ];
     for (const [side, dx, dy] of sides) {
-      const nb = doc.rooms[`${cx + dx},${cy + dy}`];
+      const nb = doc.roomAt(doc.curMap(), room.x + dx, room.y + dy);
       const mine = doc.openings(room.map, side as "left" | "right" | "top" | "bottom");
       const theirs = nb
         ? doc.openings(nb.map, side === "left" ? "right" : side === "right" ? "left" : side === "top" ? "bottom" : "top")
         : null;
       for (const i of mine) {
         const ok = theirs ? theirs.includes(i) : false;
-        c.fillStyle = ok ? "rgba(70,212,122,0.9)" : "rgba(224,90,90,0.95)";
+        c.fillStyle = !nb ? "rgba(224,90,90,0.95)" : ok ? "rgba(70,212,122,0.9)" : "rgba(120,132,148,0.8)";
         if (side === "left") c.fillRect(-3, i * ts, 3, ts);
         else if (side === "right") c.fillRect(wpx, i * ts, 3, ts);
         else if (side === "top") c.fillRect(i * ts, -3, ts, 3);
@@ -361,7 +358,7 @@ export class EditorRenderer {
     selected: boolean,
     t: number,
     index?: number,
-    ctx?: { doc: EditorDoc; roomKey: string },
+    ctx?: { doc: EditorDoc; roomId: string },
   ): void {
     const fp = footprint(o);
     const p = this.px(fp.x, fp.y);
@@ -760,12 +757,12 @@ export class EditorRenderer {
         let exRel = endPos.x - fp.x;
         let eyRel = endPos.y - fp.y;
         if (ctx) {
-          const idKey = new Map(ctx.doc.keyOrder.map((k) => [ctx!.doc.rooms[k]?.id ?? "", k]));
-          const tKey = idKey.get(endPos.room_id);
-          const [ecx, ecy] = (tKey ?? ctx.roomKey).split(",").map(Number);
-          const [ccx, ccy] = ctx.roomKey.split(",").map(Number);
-          exRel += (ecx - ccx) * ROOM_COLS;
-          eyRel += (ecy - ccy) * ROOM_ROWS;
+          const target = ctx.doc.rooms[endPos.room_id];
+          const home = ctx.doc.rooms[ctx.roomId];
+          if (target && home) {
+            exRel += (target.x - home.x) * ROOM_COLS;
+            eyRel += (target.y - home.y) * ROOM_ROWS;
+          }
         }
         const ep = { x: p.x + exRel * ts, y: p.y + eyRel * ts };
         c.strokeStyle = "rgba(255,255,255,0.45)";
