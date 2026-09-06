@@ -1,0 +1,29 @@
+{
+  "name": "plant-well",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:editor": "vite --open editor.html",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test:rooms": "node scripts/validate-rooms.ts",
+    "test:softlock": "node scripts/softlock-test.mjs",
+    "test:bubble": "node scripts/bubble-shield-test.mjs",
+    "test:vine": "node scripts/vine-test.mjs",
+    "test:content": "node scripts/content-test.mjs",
+    "test:whip": "node scripts/whip-pull-test.mjs",
+    "test:chain": "node scripts/chain-swing-test.mjs",
+    "test:batch": "node scripts/feature-batch-test.mjs",
+    "test:music": "node scripts/music-check.mjs",
+    "test:e2e": "node scripts/e2e-check.mjs",
+    "convert:music": "node scripts/convert-music.mjs",
+    "deploy": "npm run build && npx wrangler pages deploy dist --project-name plant-well"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}

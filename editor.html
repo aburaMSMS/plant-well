@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plant Well · 地图编辑器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #070b09;
+        --bg-mid: #0c1410;
+        --panel: #0e1612;
+        --panel2: #141e18;
+        --panel3: #1a2620;
+        --line: #223028;
+        --line-hi: #33483c;
+        --text: #d2ddd4;
+        --dim: #6e8074;
+        --mute: #4a5a50;
+        --accent: #7fd4a0;
+        --accent-dim: #1d3a2a;
+        --accent-line: #2e5c42;
+        --gold: #e8c878;
+        --gold-dim: #3a2e12;
+        --gold-line: #5c4a1e;
+        --danger: #e05a5a;
+        --danger-dim: #3a1a1a;
+        --danger-line: #5c2e2e;
+        --left-w: 216px;
+        --right-w: 300px;
+        --bar-h: 44px;
+        --status-h: 28px;
+        --font: "IBM Plex Sans", system-ui, sans-serif;
+        --mono: "IBM Plex Mono", ui-monospace, monospace;
+        --display: Syne, "IBM Plex Sans", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background:
+          radial-gradient(900px 520px at 50% 38%, #122018 0%, transparent 62%),
+          radial-gradient(1400px 800px at 50% 100%, #0a120e 0%, var(--bg) 70%);
+        color: var(--text);
+        font: 13px/1.45 var(--font);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 80;
+        opacity: 0.045;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+      }
+      h3 {
+        margin: 0 0 8px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+      kbd {
+        font: 10px/1.4 var(--mono);
+        background: #0a100c;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        padding: 1px 5px;
+        color: var(--dim);
+      }
+      button, select, input, a.btn {
+        font: inherit;
+        color: var(--text);
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 5px 9px;
+      }
+      button, a.btn { cursor: pointer; }
+      button:hover, a.btn:hover, select:hover { border-color: var(--line-hi); background: var(--panel3); }
+      button:focus-visible, input:focus-visible, select:focus-visible, a.btn:focus-visible {
+        outline: 1px solid var(--accent);
+        outline-offset: 1px;
+      }
+      button.active {
+        border-color: var(--accent-line);
+        color: var(--accent);
+        background: var(--accent-dim);
+        box-shadow: inset 0 0 0 1px rgba(127, 212, 160, 0.12);
+      }
+      button:disabled { opacity: 0.38; cursor: default; }
+      button.primary, a.btn.primary {
+        background: var(--accent-dim);
+        border-color: var(--accent-line);
+        color: var(--accent);
+        font-weight: 600;
+      }
+      button.primary:hover, a.btn.primary:hover {
+        background: #254a36;
+        border-color: #3e7a56;
+      }
+      button.danger { border-color: var(--danger-line); color: var(--danger); background: var(--danger-dim); }
+      button.ghost { background: transparent; }
+      button.mini { padding: 0 7px; height: 24px; }
+      button.icon {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        font-size: 14px;
+        color: var(--dim);
+      }
+      .chip {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 2px;
+        margin-right: 7px;
+        vertical-align: 0;
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+        flex: none;
+      }
+      .dim { color: var(--dim); font-size: 12px; }
+      .hint { color: var(--dim); font-size: 12px; margin: 8px 0 0; line-height: 1.5; }
+      .row { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+      .row input { flex: 1; min-width: 0; }
+      .spacer { flex: 1; }
+
+      /* —— 顶栏 —— */
+      #topbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap; /* 窄窗口折成两行：文字永不压缩折行、功能永不隐藏 */
+        gap: 6px 10px;
+        min-height: var(--bar-h);
+        padding: 3px 12px;
+        background: linear-gradient(180deg, #121a16 0%, var(--panel) 100%);
+        border-bottom: 1px solid var(--line);
+        flex: none;
+        z-index: 4;
+      }
+      #topbar button, #topbar select, #topbar a, #topbar span {
+        white-space: nowrap; /* 文字永不折行；空间不足先压缩内边距，再不行整行折到第二行 */
+      }
+      #topbar .cluster button, #topbar > button { padding-inline: 7px; }
+      #topbar .brand {
+        font-family: var(--display);
+        font-weight: 800;
+        font-size: 15px;
+        letter-spacing: 0.04em;
+        line-height: 1;
+        white-space: nowrap;
+      }
+      #topbar .brand span {
+        display: block;
+        font-family: var(--font);
+        font-weight: 500;
+        font-size: 9px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-top: 3px;
+      }
+      .roomNav {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        background: #0a100c;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .roomNav button {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        width: 28px;
+        height: 30px;
+        padding: 0;
+        color: var(--dim);
+      }
+      .roomNav button:hover { background: var(--panel3); color: var(--text); }
+      .roomNav select {
+        border: 0;
+        border-left: 1px solid var(--line);
+        border-right: 1px solid var(--line);
+        border-radius: 0;
+        background: transparent;
+        min-width: 78px;
+        height: 30px;
+        font-family: var(--mono);
+        font-size: 12px;
+        text-align: center;
+        color: var(--accent);
+      }
+      .toolstrip {
+        display: flex;
+        gap: 3px;
+        padding: 3px;
+        background: #0a100c;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .toolstrip button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+        min-width: 52px;
+        padding: 4px 8px 5px;
+        border: 0;
+        background: transparent;
+        border-radius: 5px;
+        font-size: 11px;
+        color: var(--text);
+      }
+      .toolstrip button kbd { margin: 0; }
+      .toolstrip button.active {
+        background: var(--accent-dim);
+        color: var(--accent);
+        box-shadow: none;
+      }
+      .toolstrip { flex: none; }
+      .roomNav { flex: none; }
+      .cluster {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex: none;
+      }
+      .cluster.split {
+        padding-left: 10px;
+        border-left: 1px solid var(--line);
+      }
+      .dirty {
+        color: var(--gold);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        font-weight: 500;
+      }
+      #channelWarn { color: var(--danger); }
+      #playLink {
+        text-decoration: none;
+        color: var(--accent);
+        border: 1px solid var(--accent-line);
+        border-radius: 5px;
+        padding: 5px 10px;
+        background: var(--accent-dim);
+        font-weight: 600;
+        font-size: 12px;
+      }
+      #playLink:hover { background: #254a36; }
+
+      /* —— 恢复条 —— */
+      #restoreBar {
+        background: var(--gold-dim);
+        border-bottom: 1px solid var(--gold-line);
+        padding: 7px 14px;
+        flex: none;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        color: var(--gold);
+        font-size: 12px;
+        z-index: 5;
+      }
+
+      /* —— 三栏主体 —— */
+      main { flex: 1; display: flex; min-height: 0; }
+      aside {
+        flex: none;
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      #left {
+        width: var(--left-w);
+        border-right: 1px solid var(--line);
+      }
+      #right {
+        width: var(--right-w);
+        border-left: 1px solid var(--line);
+      }
+      .paneHead {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        padding: 10px 12px 8px;
+        border-bottom: 1px solid var(--line);
+        flex: none;
+      }
+      .paneHead h3 { margin: 0; }
+      .paneBody {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 10px 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      #objPalette { display: flex; flex-direction: column; gap: 2px; }
+      #objPalette button {
+        display: flex;
+        align-items: center;
+        text-align: left;
+        gap: 2px;
+        padding: 5px 8px;
+        font-size: 12px;
+        background: transparent;
+        border-color: transparent;
+        border-radius: 5px;
+      }
+      #objPalette button:hover { background: var(--panel3); border-color: transparent; }
+      #objPalette button .tag {
+        margin-left: auto;
+        font-size: 10px;
+        color: var(--mute);
+        letter-spacing: 0.04em;
+      }
+      #objPalette button.active {
+        background: var(--accent-dim);
+        border-color: transparent;
+        color: var(--accent);
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+      #objPalette button.active .tag { color: var(--accent); opacity: 0.7; }
+      #objPalette button.catHead {
+        background: transparent;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+        font-size: 11px;
+        color: var(--dim);
+        margin-top: 6px;
+        padding: 6px 8px;
+        text-transform: uppercase;
+      }
+      #objPalette button.catHead:first-child { margin-top: 0; }
+      #objPalette button.catHead:hover { color: var(--text); background: var(--panel2); }
+      #objPalette button.catHead .catArrow {
+        width: 12px;
+        color: var(--mute);
+        font-size: 9px;
+      }
+      #objPalette button.catHead .catCount {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 400;
+        color: var(--mute);
+        letter-spacing: 0;
+        text-transform: none;
+      }
+
+      #center {
+        flex: 1;
+        min-width: 0;
+        position: relative;
+        background: #050807;
+        box-shadow: inset 0 0 90px rgba(0, 0, 0, 0.55);
+      }
+      #view {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        cursor: crosshair;
+        display: block;
+      }
+      #pickBanner {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 6;
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: var(--gold-dim);
+        border: 1px solid var(--gold-line);
+        color: var(--gold);
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      }
+
+      .toast {
+        position: absolute;
+        left: 50%;
+        top: 14px;
+        transform: translateX(-50%) translateY(-6px);
+        padding: 7px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        opacity: 0;
+        transition: opacity 0.25s, transform 0.25s;
+        pointer-events: none;
+        z-index: 30;
+        box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+      .toast.ok { background: var(--accent-dim); border: 1px solid var(--accent-line); color: var(--accent); }
+      .toast.warn { background: var(--gold-dim); border: 1px solid var(--gold-line); color: var(--gold); }
+      .toast.err { background: var(--danger-dim); border: 1px solid var(--danger-line); color: #ff8a8a; }
+
+      /* —— 右侧分页 —— */
+      #rightTabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        flex: none;
+        border-bottom: 1px solid var(--line);
+      }
+      #rightTabs button {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        padding: 10px 8px 9px;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--dim);
+        font-weight: 600;
+      }
+      #rightTabs button.active {
+        color: var(--accent);
+        background: transparent;
+        box-shadow: inset 0 -2px 0 var(--accent);
+        border-color: transparent;
+      }
+      #rightObj, #rightRoom {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #inspector {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 12px;
+      }
+      #inspector .objhead {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 12px;
+        font-size: 14px;
+      }
+      #inspector .objhead b { font-weight: 600; }
+      #inspector .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      #inspector label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
+      #inspector input, #inspector select { width: 100%; }
+      #inspector button.danger { width: 100%; margin-top: 12px; }
+      #inspector .empty {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 8px 2px 0;
+      }
+      #inspector .empty .placeCard {
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      #inspector .empty .placeCard b { color: var(--accent); font-weight: 600; }
+      #inspector .locfield { grid-column: 1 / -1; }
+      #inspector .locrow { display: flex; gap: 4px; align-items: center; }
+      #inspector .loc-room { flex: 1; min-width: 0; font-family: var(--mono); }
+      #inspector .loc-xy { width: 52px; font-family: var(--mono); }
+      #inspector .pickBtn { padding: 4px 7px; flex: none; }
+      #inspector .pickBtn.armed { background: #2f6a52; color: #eafff4; border-color: var(--accent-line); }
+      #inspector .bindfield { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+      #inspector .bindlist { display: flex; flex-wrap: wrap; gap: 4px; min-height: 18px; }
+      #inspector .bindchip { display: inline-flex; align-items: center; gap: 3px; background: #14231d; border: 1px solid #2c4a3c; border-radius: 3px; padding: 1px 4px; font-size: 11px; color: #aef0d8; }
+      #inspector .bindX { border: none; background: none; color: #e08a8a; cursor: pointer; font-size: 12px; padding: 0 2px; line-height: 1; }
+      #inspector .bindX:hover { color: #ffb0b0; }
+      #inspector .bindBtn { align-self: flex-start; padding: 4px 10px; cursor: pointer; }
+      #inspector .bindBtn.armed { background: #2f6a52; color: #eafff4; border-color: var(--accent-line); }
+      #inspector .roidfield { display: flex; align-items: center; gap: 6px; }
+      #inspector .roid { font-family: ui-monospace, monospace; letter-spacing: 1px; color: #aef0d8; background: #14231d; border: 1px solid #2c4a3c; border-radius: 3px; padding: 2px 8px; }
+
+      #lights { display: flex; flex-direction: column; gap: 4px; }
+      .light { display: flex; gap: 4px; align-items: center; }
+      .light input { width: 52px; padding: 3px 4px; font-size: 12px; font-family: var(--mono); }
+      #mapDock {
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+        z-index: 5;
+        padding: 4px;
+        background: rgba(8, 14, 10, 0.88);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(6px);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 72px;
+      }
+      #mapToggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 3px 8px;
+        background: transparent;
+        border: 0;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--dim);
+        font-weight: 600;
+      }
+      #mapToggle:hover { color: var(--text); background: var(--panel3); border-color: transparent; }
+      #mapToggle .mapKey { font-family: var(--mono); color: var(--accent); letter-spacing: 0; text-transform: none; }
+      #mapDock.collapsed { padding: 2px 2px 2px 4px; }
+      #mapDock.collapsed #roomMap { display: none; }
+      #mapDock #roomMap {
+        width: auto;
+        max-width: 260px;
+        height: auto;
+        display: block;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        cursor: pointer;
+        image-rendering: pixelated;
+        touch-action: none;
+      }
+      #rightRoom .paneBody { gap: 16px; }
+      #rightRoom section { display: flex; flex-direction: column; }
+      #mossColor { flex: 1; height: 28px; padding: 2px; }
+
+      /* —— 工坊 —— */
+      #workshop {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(4, 8, 6, 0.72);
+        backdrop-filter: blur(8px);
+      }
+      .wsPanel {
+        width: 720px;
+        max-width: 94vw;
+        max-height: 86vh;
+        background: var(--panel);
+        border: 1px solid var(--line-hi);
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(127, 212, 160, 0.06);
+      }
+      .wsHead {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .wsHead b {
+        font-family: var(--display);
+        letter-spacing: 0.08em;
+        font-size: 14px;
+        color: var(--accent);
+      }
+      .wsTabs { display: flex; gap: 4px; margin-left: auto; padding: 3px; background: #0a100c; border-radius: 7px; border: 1px solid var(--line); }
+      .wsTabs button { border: 0; background: transparent; }
+      .wsTabs button.active { background: var(--accent-dim); color: var(--accent); }
+      .wsBody { display: flex; min-height: 0; overflow: hidden; flex: 1; }
+      .wsList {
+        width: 188px; flex: none; overflow-y: auto;
+        border-right: 1px solid var(--line);
+        padding: 10px; display: flex; flex-direction: column; gap: 3px;
+      }
+      .wsList button { display: flex; align-items: center; text-align: left; gap: 6px; font-size: 12px; padding: 6px 8px; }
+      .wsEdit { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+      .wsEdit h3 { margin: 0 0 4px; }
+      .wsrow { display: grid; grid-template-columns: 150px 1fr 42px; gap: 8px; align-items: center; font-size: 12px; color: var(--dim); }
+      .wsrow input[type="color"] { height: 28px; padding: 0 2px; width: 100%; }
+      .wsrow input[type="range"] { width: 100%; }
+      .wsrow input[type="checkbox"] { justify-self: start; }
+      .wsnum { font-size: 11px; text-align: right; color: var(--text); font-family: var(--mono); }
+      .wswh { display: flex; gap: 10px; }
+      .wswh label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dim); }
+      .wswh input { width: 56px; }
+      canvas.wsPreview {
+        width: 140px; height: 104px;
+        image-rendering: pixelated;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        align-self: center;
+        background: #0a100c;
+      }
+      .wsBtns { display: flex; gap: 8px; margin-top: 4px; }
+
+      /* —— 帮助浮层 —— */
+      #helpOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 35;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(4, 8, 6, 0.62);
+        backdrop-filter: blur(6px);
+      }
+      #help {
+        width: 420px;
+        max-width: 92vw;
+        background: var(--panel);
+        border: 1px solid var(--line-hi);
+        border-radius: 10px;
+        padding: 18px 20px 16px;
+        font-size: 13px;
+        color: var(--dim);
+        box-shadow: 0 20px 48px rgba(0,0,0,0.5);
+      }
+      #help h3 { color: var(--accent); letter-spacing: 0.14em; margin-bottom: 12px; }
+      #help b { color: var(--text); font-weight: 600; }
+      #help p { margin: 0 0 8px; }
+      #help .helpKeys { display: grid; grid-template-columns: 88px 1fr; gap: 6px 10px; margin: 12px 0; font-size: 12px; }
+      #help .helpKeys span:first-child { font-family: var(--mono); color: var(--accent); }
+
+      /* —— 日志抽屉 + 状态栏 —— */
+      #logDrawer {
+        flex: none;
+        max-height: 140px;
+        overflow: hidden;
+        border-top: 1px solid var(--line);
+        background: #0a100c;
+      }
+      #log {
+        overflow-y: auto;
+        max-height: 140px;
+        font-size: 12px;
+        font-family: var(--mono);
+        padding: 6px 12px;
+      }
+      #log .issue, #issues .issue { padding: 2px 4px; border-radius: 3px; }
+      .issue.error { color: #ff8a8a; }
+      .issue.warn { color: var(--gold); }
+      .issue.info { color: var(--dim); }
+      .issue.ok { color: var(--accent); }
+
+      #statusbar {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: var(--status-h);
+        padding: 0 12px;
+        background: var(--panel);
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+        color: var(--dim);
+        font-family: var(--mono);
+        z-index: 4;
+      }
+      #stIssues {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        font: inherit;
+        font-family: var(--mono);
+        color: var(--dim);
+      }
+      #stIssues:hover { color: var(--text); background: transparent; border-color: transparent; }
+      #stIssues.err { color: #ff8a8a; }
+      #stIssues.warn { color: var(--gold); }
+      #stIssues.ok { color: var(--accent); }
+      #stLogBtn {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        color: var(--dim);
+        font: inherit;
+        font-family: var(--mono);
+        max-width: 46%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: right;
+      }
+      #stLogBtn:hover { color: var(--text); background: transparent; border-color: transparent; }
+
+      aside::-webkit-scrollbar, #inspector::-webkit-scrollbar, #log::-webkit-scrollbar,
+      .paneBody::-webkit-scrollbar, .wsList::-webkit-scrollbar, .wsEdit::-webkit-scrollbar {
+        width: 8px;
+      }
+      aside::-webkit-scrollbar-thumb, #inspector::-webkit-scrollbar-thumb, #log::-webkit-scrollbar-thumb,
+      .paneBody::-webkit-scrollbar-thumb, .wsList::-webkit-scrollbar-thumb, .wsEdit::-webkit-scrollbar-thumb {
+        background: #24332a; border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <header id="topbar">
+      <div class="brand">PLANT WELL<span>井图测绘</span></div>
+      <div class="cluster">
+        <select id="mapSelect" title="选择编辑哪张地图（★ = 游戏采用的地图）" style="max-width: 132px"></select>
+        <button id="mapNew" class="ghost" title="新建一张空白地图">＋图</button>
+        <button id="mapImport" class="ghost" title="导入地图文件（.json）">导入</button>
+        <button id="mapExport" class="ghost" title="把当前编辑的地图导出为 .json 文件">导出</button>
+        <button id="mapGame" class="ghost" title="把当前编辑的地图设为游戏地图（保存时写进 GAME_MAP_ID）">★游戏图</button>
+        <input id="mapFile" type="file" accept=".json,application/json" hidden />
+      </div>
+      <div class="roomNav">
+        <button id="prevRoom" title="上一个房间 [">◀</button>
+        <select id="roomSelect" title="当前房间"></select>
+        <button id="nextRoom" title="下一个房间 ]">▶</button>
+      </div>
+      <div id="tools" class="toolstrip"></div>
+      <span class="spacer"></span>
+      <span id="dirty" class="dirty" hidden>● 未保存</span>
+      <span id="channelWarn" class="dirty" hidden title="写回接口只在本地 dev server（npx vite）存在。线上环境：编辑后用「导出」下载 .json，放到本地 src/data/maps/ 再保存即可">⚠ 写回通道不可用（线上仅可导出）</span>
+      <div class="cluster">
+        <button id="undo" class="ghost" title="撤销 Ctrl+Z">撤销</button>
+        <button id="redo" class="ghost" title="重做 Ctrl+Y">重做</button>
+      </div>
+      <div class="cluster split">
+        <button id="matBtn" class="ghost" title="定制所有物件的材质（主色/高光/自发光）">材质</button>
+        <button id="propBtn" class="ghost" title="创造并编辑自定义物件">物品</button>
+      </div>
+      <a id="playLink" href="/?debug=1" target="_blank" title="在游戏里试玩当前房间（debug 模式直达）">试玩</a>
+      <div class="cluster">
+        <button id="copyBtn" class="ghost" title="把当前编辑地图的 JSON 复制到剪贴板">复制</button>
+        <button id="saveBtn" class="primary" title="写回 src/data/maps/ 下的地图 JSON（Ctrl+S）">保存</button>
+        <button id="resetBtn" class="ghost" title="丢弃修改，还原为源码数据">还原</button>
+      </div>
+      <button id="helpBtn" class="icon" title="快捷键与说明">?</button>
+    </header>
+
+    <div id="restoreBar" hidden>
+      <span>检测到上次未保存的编辑（浏览器里有备份）。</span>
+      <button id="restoreYes">恢复</button>
+      <button id="restoreNo" class="ghost">丢弃</button>
+    </div>
+
+    <main>
+      <aside id="left">
+        <div class="paneHead">
+          <h3>物件</h3>
+          <span class="dim">点分类展开</span>
+        </div>
+        <div class="paneBody">
+          <div id="objPalette"></div>
+        </div>
+      </aside>
+
+      <div id="center">
+        <canvas id="view"></canvas>
+        <div id="pickBanner" hidden>选点中 · 点画布落点 · Esc 取消</div>
+        <div id="mapDock">
+          <button type="button" id="mapToggle" title="展开 / 折叠井图">井图 <span class="mapKey" id="mapKey"></span></button>
+          <canvas id="roomMap" title="左键点房间切换、点空格确认后创建新房间；右键/中键拖动平移井图"></canvas>
+        </div>
+      </div>
+
+      <aside id="right">
+        <div id="rightTabs">
+          <button type="button" data-tab="obj" class="active">物件</button>
+          <button type="button" data-tab="room">房间</button>
+        </div>
+        <div id="rightObj">
+          <section id="inspector"></section>
+        </div>
+        <div id="rightRoom" hidden>
+          <div class="paneBody">
+            <section>
+              <h3>地图</h3>
+              <div class="row" style="margin-top:0">
+                <input id="mapName" title="地图显示名" placeholder="地图名" />
+              </div>
+              <p class="hint" style="margin:4px 0 0" id="mapMeta"></p>
+              <div class="row">
+                <button id="mapSetSpawn" title="把出生点移到当前编辑的房间">出生点→本房</button>
+                <label class="dim" style="display:flex;gap:4px;align-items:center">x<input id="spawnX" type="number" style="width:56px" min="0" max="319" title="出生点像素 x（房内）"></label>
+                <label class="dim" style="display:flex;gap:4px;align-items:center">y<input id="spawnY" type="number" style="width:56px" min="0" max="179" title="出生点像素 y（房内）"></label>
+              </div>
+              <div class="row">
+                <button id="mapDelete" class="danger" title="删除当前编辑的地图（最后一张不可删）">删除本图</button>
+              </div>
+              <p class="hint">★游戏图 / ＋新建 / 导入导出在顶栏。游戏只运行 ★ 那一张；跨图传送（游戏内）留待后续。</p>
+            </section>
+            <section>
+              <h3>井结构</h3>
+              <p class="hint" style="margin:0 0 8px">左下角井图点选切房、点空位确认后建房（右键拖动平移）。也可用坐标新建。</p>
+              <div class="row" style="margin-top:0">
+                <input id="newRoomKey" placeholder="col,row" />
+                <button id="addRoom">新建</button>
+                <button id="delRoom" class="danger">删除</button>
+              </div>
+            </section>
+            <section>
+              <h3>房间光源</h3>
+              <div id="lights"></div>
+              <div class="row"><button id="addLight">+ 添加光源</button></div>
+            </section>
+            <section>
+              <h3>发光苔藓</h3>
+              <div class="row">
+                <input type="color" id="mossColor" title="本房间发光苔藓的颜色">
+                <button id="mossAuto" title="清除指定，恢复按生物群系+房间自动变化">自动</button>
+              </div>
+              <p class="hint">贴岩壁生长；不指定则每层每房自动有色差。</p>
+            </section>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <div id="logDrawer" hidden>
+      <div id="log"></div>
+    </div>
+
+    <footer id="statusbar">
+      <span id="stPos"></span>
+      <span id="stTool"></span>
+      <button type="button" id="stIssues" class="ghost" title="点这里把校验结果打进日志">校验</button>
+      <span class="spacer"></span>
+      <button type="button" id="stLogBtn" title="打开日志">日志 · <span id="stLog">就绪</span></button>
+    </footer>
+
+    <div id="helpOverlay" hidden>
+      <div id="help">
+        <h3>井图说明</h3>
+        <div class="helpKeys">
+          <span>V / B / R</span><span>选择（点选/框选） · 放置/画笔 · 矩形填充（跟随所选材料：岩壁/空气）</span>
+          <span>左键</span><span>使用当前工具；选择模式下空白处拖拽=框选多选（Del 批量删除）</span>
+          <span>右键 / 中键拖动</span><span>平移画布——看到邻房，跨房放置/点选</span>
+          <span>滚轮</span><span>缩放画布</span>
+          <span>[ ]</span><span>切换工作房间</span>
+          <span>Ctrl+S</span><span>写回地图 JSON</span>
+          <span>Del</span><span>删除选中物件</span>
+          <span>顶栏地图簇</span><span>选图编辑 · ＋新建 · 导入/导出 .json · ★ 设为游戏地图</span>
+          <span>井图小地图</span><span>左键点选切房 / 点空格确认建新房；右键/中键拖动平移（世界无限大，余量随生长外扩）</span>
+        </div>
+        <p>多地图：一张地图 = 房间集 + 出生点。编辑的可以是任意一张，<b>游戏只运行 ★ 那张</b>；地图之间游戏内传送留待后续。</p>
+        <p>绑定：选中 开关/压力板（或 门/电梯/睡莲）→ 检查器里点 <b style="color:#aef0d8">🔗 绑定</b> → 点画布上的配对物件（可跨房）= 双向绑定；列表里的 <b>×</b> = 双向解除。</p>
+        <p>房间边缘的 <b style="color:#46d47a">绿条</b> = 洞口与邻室配对，<b style="color:#e05a5a">红条</b> = 不配对或临空（会漏）。</p>
+        <p>修改先落在内存。点「保存」（Ctrl+S）一键写回 maps/ 目录的 JSON 文件，游戏页会自动刷新；外部手改这些 JSON 后需刷新编辑器。</p>
+      </div>
+    </div>
+
+    <div id="workshop" hidden></div>
+
+    <script type="module" src="/src/editor/main.ts"></script>
+  </body>
+</html>

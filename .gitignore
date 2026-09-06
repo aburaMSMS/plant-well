@@ -1,0 +1,10 @@
+*.log
+.DS_Store
+.playwright-mcp/
+.wrangler/
+Thumbs.db
+dist/
+node_modules/
+tmp-*.json
+tmp-*.png
+src/assets/music/*.wav
