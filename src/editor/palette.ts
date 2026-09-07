@@ -46,10 +46,10 @@ export const CATEGORIES = [
 export type CatId = (typeof CATEGORIES)[number]["id"];
 
 export const TILES = [
-  { ch: "#", label: "实心岩壁", color: "#454f5e" },
-  { ch: ".", label: "空气", color: "#14181f" },
-  { ch: "*", label: "冰块", color: "#9fd0e8" },
-  { ch: "@", label: "黑幕", color: "rgba(96,106,120,0.45)" },
+  { ch: "#", label: "实心岩壁", short: "岩壁", color: "#454f5e" },
+  { ch: ".", label: "空气", short: "空气", color: "#14181f" },
+  { ch: "*", label: "冰块", short: "冰块", color: "#9fd0e8" },
+  { ch: "@", label: "黑幕", short: "黑幕", color: "rgba(96,106,120,0.45)" },
 ] as const; // 尖刺不是瓦片：一律用伤害类的地刺物件
 
 export const OBJ_SPECS: ObjSpec[] = [

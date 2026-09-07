@@ -13,6 +13,7 @@ import {
   num,
   objPos,
   objSpec,
+  TILES,
   type FieldSpec,
   type ObjRec,
 } from "./palette";
@@ -709,11 +710,9 @@ function setTool(t: Tool): void {
 // 分类折叠状态（内存态；建筑类默认展开）
 const expandedCats = new Set<string>(["build"]);
 
-/** 建筑类特例：岩壁/空气是画笔瓦片不是物件，与分类一起列出。空气=擦除（画笔/矩形通用）。 */
-const BUILD_ENTRIES = [
-  { ch: "#", label: "岩壁", color: "#454f5e" },
-  { ch: ".", label: "空气", color: "#10151c" },
-];
+/** 建筑类特例：画笔瓦片（岩壁/空气/冰块/黑幕）不是物件，与分类一起列出。空气=擦除（画笔/矩形通用）。
+ *  单一来源 = palette.TILES，这里只做展示映射——新增瓦片改 TILES 一处即可。 */
+const BUILD_ENTRIES = TILES.map((t) => ({ ch: t.ch, label: t.short, color: t.color }));
 
 function catCount(catId: string): number {
   if (catId === "build") return BUILD_ENTRIES.length;
