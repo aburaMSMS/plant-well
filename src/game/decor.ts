@@ -272,7 +272,7 @@ export class RoomDecor {
     const p = this.palette;
 
     // 苔藓色：房间数据可显式指定（moss: "#hex"），缺省按生物群系底色 + 房间种子微调
-    const defMoss = ROOMS[key]?.moss;
+    const defMoss = ROOMS[key]?.roomColor;
     this.mossColor = defMoss ? hexToRgb(defMoss) : defaultMoss(depth, rng);
 
 
@@ -734,13 +734,14 @@ export class RoomDecor {
   }
 
   /** 主题色染：把场景物件的基础色向本房苔藓色混合 k 比例（0~1）——
-   *  房间主题影响场景类观感但不完全变色（用户需求：倾向一点）。 */
+   *  房间主题影响场景类观感但不完全变色（用户需求：倾向一点）。返回 #rrggbb，可与 shade 组合。 */
   tint(base: string, k = 0.35): string {
     const n = parseInt(base.replace("#", ""), 16);
     const br = (n >> 16) & 255, bg = (n >> 8) & 255, bb = n & 255;
     const m = this.mossColor.split(",").map((v) => Number(v));
-    const mix = (a: number, b: number) => Math.round(a + (b - a) * k);
-    return `rgb(${mix(br, m[0])},${mix(bg, m[1])},${mix(bb, m[2])})`;
+    const mix = (a: number, b: number) => Math.max(0, Math.min(255, Math.round(a + (b - a) * k)));
+    const hex = (v: number) => v.toString(16).padStart(2, "0");
+    return `#${hex(mix(br, m[0]))}${hex(mix(bg, m[1]))}${hex(mix(bb, m[2]))}`;
   }
 
   /** 环境微光：装饰灯/萤光苔/孢子/背景星点的慢脉搏光晕。光照后 additive。 */

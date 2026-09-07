@@ -40,7 +40,7 @@ type RawObj =
   // 小树：location=树基所在空气格（下一格须实心）。灭泡泡、不影响蔓豆茎；不参与碰撞。
   // h 可选：显式指定树高（2~10，钳位）；缺省按坐标种子随机 2~5
   | { type: "tree"; location: ObjPos; h?: number }
-  // 场景花卉/草类：纯装饰无碰撞，颜色受房间主题色（moss）渲染倾向。
+  // 场景花卉/草类：纯装饰无碰撞，颜色受房间配色（roomColor）渲染倾向。
   // variety 用中文品种名（属性栏下拉直选）：花=小花/向日葵/牡丹/油菜花；草=小草/灌木/蕨丛
   | { type: "flora"; location: ObjPos; variety?: string }
   | { type: "grass"; location: ObjPos; variety?: string }
@@ -92,7 +92,8 @@ export interface RoomDef {
   /** 房间自带的固定光源（如井口的天光），世界坐标按本房间像素。 */
   lights?: { x: number; y: number; r: number }[];
   /** 发光苔藓的颜色（"#hex"）。缺省按生物群系底色+房间种子微调。 */
-  moss?: string;
+  /** 房间配色：发光苔藓按此色生长，场景物件颜色向它倾向（缺省=按生物群系+房间自动）。 */
+  roomColor?: string;
 }
 
 // ============ 多地图 ============

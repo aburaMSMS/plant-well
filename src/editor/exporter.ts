@@ -11,7 +11,7 @@ export function serializeMap(m: MapRec): string {
       if (!r) return null;
       const out: Record<string, unknown> = { id: r.id, x: r.x, y: r.y, map: r.map, objects: r.objects };
       if (r.lights?.length) out.lights = r.lights;
-      if (r.moss) out.moss = r.moss;
+      if (r.roomColor) out.roomColor = r.roomColor;
       return out;
     })
     .filter((r) => r != null);

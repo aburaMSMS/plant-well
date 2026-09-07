@@ -198,7 +198,7 @@ export class World {
     this.spPos.clear();
     this.player.hp = this.player.maxHp;
     this.loadRoom(SPAWN.room);
-    this.player.spawnAt(SPAWN.x, SPAWN.y);
+    this.spawnPlayerSafely(SPAWN.x, SPAWN.y);
     this.lastSafeX = SPAWN.x;
     this.lastSafeY = SPAWN.y;
     this.entryX = SPAWN.x;
@@ -212,6 +212,12 @@ export class World {
     } catch {
       return false;
     }
+  }
+
+  /** 出生/重生统一走这里：落点若嵌进实心（地形改动埋住出生点等）就近择址。 */
+  private spawnPlayerSafely(x: number, y: number): void {
+    const spot = this.resolveEmbed(x, y);
+    this.player.spawnAt(spot.x, spot.y);
   }
 
   continueGame(): boolean {
@@ -232,7 +238,7 @@ export class World {
     this.checkpoint = save.checkpoint ?? null;
     this.spPos = new Map(Object.entries(save.spPos ?? {}));
     this.loadRoom(save.roomId);
-    this.player.spawnAt(save.x, save.y);
+    this.spawnPlayerSafely(save.x, save.y);
     this.lastSafeX = save.x;
     this.lastSafeY = save.y;
     this.entryX = save.x;
@@ -980,7 +986,8 @@ export class World {
       if (rid !== this.roomId) {
         this.loadRoom(rid);
       }
-      p.finishRespawnAt(x, y);
+      const spot = this.resolveEmbed(x, y);
+      p.finishRespawnAt(spot.x, spot.y);
       this.entryX = x;
       this.entryY = y;
       this.lastSafeX = x;

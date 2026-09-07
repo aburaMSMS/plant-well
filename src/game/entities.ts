@@ -1522,11 +1522,15 @@ export class SmallTree extends BaseEntity {
   popsBubbles(): Rect {
     return this.rect;
   }
-  draw(ctx: CanvasRenderingContext2D): void {
+  draw(ctx: CanvasRenderingContext2D, w?: World): void {
     const sway = Math.round(Math.sin(this.t * 1.1 + this.x) * 0.8);
     const x = Math.round(this.x);
     const base = Math.round(this.y);
     const h = this.ht;
+    // 树冠色向房间配色倾向（场景类受主题影响）；无 world（编辑器等）用原色
+    const leafBase = w ? w.room.decor.tint(mat("tree").base, 0.3) : mat("tree").base;
+    const leafHi = w ? w.room.decor.tint(shade(mat("tree").base, 1.15), 0.3) : shade(mat("tree").base, 1.15);
+    const leafLo = w ? w.room.decor.tint(shade(mat("tree").base, 0.7), 0.3) : shade(mat("tree").base, 0.7);
     const trunkH = (h - 1) * TILE - 1; // 冠占顶上一格，其余是干
     const top = base - trunkH;
     // 根裙
@@ -1543,17 +1547,17 @@ export class SmallTree extends BaseEntity {
     // 冠：实心剪影 + 深描边，和背景草分开
     const cw = 15 + h * 2;
     const crownDrop = h > 3 ? 1 : 0;
-    ctx.fillStyle = shade(mat("tree").base, 0.35);
+    ctx.fillStyle = shade(leafLo, 0.35);
     ctx.fillRect(x - cw / 2 - 1, top - 12 - crownDrop, cw + 2, 16);
-    ctx.fillStyle = mat("tree").base;
+    ctx.fillStyle = leafBase;
     ctx.beginPath();
     ctx.ellipse(x, top - 4, cw / 2 - 1, 7 + crownDrop, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = shade(mat("tree").base, 1.15);
+    ctx.fillStyle = leafHi;
     ctx.beginPath();
     ctx.ellipse(x - 2 + sway, top - 7, cw * 0.28, 4, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = shade(mat("tree").base, 0.7);
+    ctx.fillStyle = leafLo;
     ctx.fillRect(x - cw / 2 + 2, top - 2, cw - 4, 2);
     ctx.fillStyle = mat("tree").accent;
     ctx.fillRect(x - cw / 2 + 3 + sway, top - 8, Math.round(cw * 0.4), 1);
@@ -1611,20 +1615,23 @@ export class Flower extends BaseEntity {
     const bodyY = baseY - 34 + breath;
     ctx.fillStyle = "#1a2018";
     ctx.fillRect(x - 8, bodyY + 7, 16, 20);
-    ctx.fillStyle = ready ? "#c9a86a" : mat("flower").base;
+    // 未就绪的苞体颜色向房间配色轻微倾向（场景类受主题影响）；就绪态金色不变
+    const budBase = ready ? "#c9a86a" : w.room.decor.tint(mat("flower").base, 0.25);
+    const budHi = ready ? "#e8c887" : w.room.decor.tint(shade(mat("flower").base, 1.25), 0.25);
+    ctx.fillStyle = budBase;
     ctx.fillRect(x - 7, bodyY + 8, 14, 18);
     ctx.fillRect(x - 5, bodyY + 4, 10, 6);
     ctx.fillRect(x - 3, bodyY + 1, 6, 4);
-    ctx.fillStyle = ready ? "#e8c887" : shade(mat("flower").base, 1.25);
+    ctx.fillStyle = budHi;
     ctx.fillRect(x - 4, bodyY + 6, 8, 14);
     ctx.fillRect(x - 2, bodyY + 2, 4, 6);
-    ctx.fillStyle = ready ? "#fff3cf" : mat("flower").accent;
+    ctx.fillStyle = ready ? "#fff3cf" : w.room.decor.tint(mat("flower").accent, 0.25);
     ctx.fillRect(x - 2, bodyY + 8, 4, 8);
-    ctx.fillStyle = ready ? "#a8874e" : shade(mat("flower").base, 0.75);
+    ctx.fillStyle = ready ? "#a8874e" : w.room.decor.tint(shade(mat("flower").base, 0.75), 0.25);
     ctx.fillRect(x - 6, bodyY + 12, 12, 1);
     ctx.fillRect(x - 4, bodyY + 7, 8, 1);
     ctx.fillRect(x - 2, bodyY + 3, 4, 1);
-    ctx.fillStyle = ready ? "#fff3cf" : mat("flower").accent;
+    ctx.fillStyle = ready ? "#fff3cf" : w.room.decor.tint(mat("flower").accent, 0.25);
     ctx.fillRect(x - 1, bodyY + 1, 2, 1);
     // 10 个源种凹槽：收集几个亮几个——不用文字告诉玩家差多少
     for (let i = 0; i < 10; i++) {

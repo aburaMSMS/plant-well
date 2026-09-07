@@ -1377,6 +1377,7 @@ function refreshInspector(): void {
 function refreshLights(): void {
   const box = $("#lights");
   const room = doc.rooms[curKey];
+  refreshRoomColor(room); // 房间配色必须独立于光源列表刷新——“无光源早退”曾把面板冻在旧色（黑色 bug 根因）
   const ls = room?.lights ?? [];
   if (!ls.length) {
     box.innerHTML = `<p class="dim">无固定光源。</p>`;
@@ -1411,9 +1412,6 @@ function refreshLights(): void {
       });
     });
   });
-  // 发光苔藓颜色
-  const mossInput = $("#mossColor") as HTMLInputElement;
-  mossInput.value = room?.moss ?? "#5fb86a";
 }
 
 function refreshStatusStatic(): void {
@@ -1953,19 +1951,27 @@ function setupChrome(): void {
   $("#mapDock").addEventListener("pointerdown", (e) => e.stopPropagation());
 }
 
-($("#mossColor") as HTMLInputElement).addEventListener("change", (e) => {
+/** 房间配色输入框回显：无指定时显示该房深度的生物群系自动色（与游戏 defaultMoss 同源三档）。 */
+function refreshRoomColor(room: { roomColor?: string; y?: number } | undefined): void {
+  const mossInput = $("#mossColor") as HTMLInputElement;
+  const v = room?.roomColor ?? "";
+  const depth = (room?.y ?? 0) / 6;
+  const auto = depth < 0.34 ? "#3a5828" : depth < 0.67 ? "#265248" : "#3e2c5c";
+  mossInput.value = /^#[0-9a-fA-F]{6}$/.test(v) ? v : auto;
+}
+$("#mossColor").addEventListener("change", (e) => {
   const v = (e.target as HTMLInputElement).value;
   const room = doc.rooms[curKey];
   if (!room) return;
   doc.mutate(() => {
-    room.moss = v;
+    room.roomColor = v;
   });
 });
 $("#mossAuto").addEventListener("click", () => {
   const room = doc.rooms[curKey];
   if (!room) return;
   doc.mutate(() => {
-    delete room.moss;
+    delete room.roomColor;
   });
 });
 

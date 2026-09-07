@@ -115,6 +115,9 @@ for (const m of MAP_LIST) {
           }
         }
       }
+      if ((def as { roomColor?: unknown }).roomColor !== undefined && !/^#[0-9a-fA-F]{6}$/.test((def as { roomColor: string }).roomColor)) {
+        fail(`${where}: roomColor 须是 #rrggbb`);
+      }
       if (o.type === "vine") {
         // 锚点：上一行两格都必须是实心天花板；垂落区：整段必须是空气
         const above = def.map[o.location.y - 1];

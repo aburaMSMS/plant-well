@@ -7,7 +7,7 @@ import { propByIdDoc } from "./mats";
 import { num, type ObjRec } from "./palette";
 
 export interface LightRec { x: number; y: number; r: number }
-export interface RoomRec { id: string; x: number; y: number; map: string[]; objects: ObjRec[]; lights?: LightRec[]; moss?: string }
+export interface RoomRec { id: string; x: number; y: number; map: string[]; objects: ObjRec[]; lights?: LightRec[]; roomColor?: string }
 /** 出生点/地图元数据里的 room 是房间 id（"R05"），不是网格坐标。 */
 export interface SpawnRec { room: string; x: number; y: number }
 export interface MapRec {
@@ -90,7 +90,7 @@ export class EditorDoc {
     this.baseGame = this.gameMapId;
   }
 
-  private toRec(def: { id: string; name: string; spawn: SpawnRec; rooms: { id: string; x: number; y: number; map: string[]; objects?: ObjRec[]; lights?: LightRec[]; moss?: string }[] }): MapRec {
+  private toRec(def: { id: string; name: string; spawn: SpawnRec; rooms: { id: string; x: number; y: number; map: string[]; objects?: ObjRec[]; lights?: LightRec[]; roomColor?: string }[] }): MapRec {
     const rec: MapRec = { id: def.id, name: def.name, spawn: { ...def.spawn }, idOrder: [], rooms: {} };
     for (const r of def.rooms) {
       rec.idOrder.push(r.id);
@@ -101,7 +101,7 @@ export class EditorDoc {
         map: [...r.map],
         objects: (r.objects ?? []).map((o) => ({ ...o }) as ObjRec),
         lights: r.lights?.map((l) => ({ ...l })),
-        moss: r.moss,
+        roomColor: r.roomColor,
       };
     }
     return rec;
@@ -348,7 +348,7 @@ export class EditorDoc {
     const rec: MapRec = { id, name, spawn, idOrder: [], rooms: {} };
     let dropped = 0;
     for (const raw of d.rooms) {
-      const r = raw as { id?: unknown; x?: unknown; y?: unknown; map?: unknown; objects?: unknown; lights?: unknown; moss?: unknown };
+      const r = raw as { id?: unknown; x?: unknown; y?: unknown; map?: unknown; objects?: unknown; lights?: unknown; roomColor?: unknown };
       if (typeof r.id !== "string" || !/^[A-Z0-9]{3}$/.test(r.id) || !Array.isArray(r.map)) {
         dropped++;
         continue;
@@ -368,7 +368,7 @@ export class EditorDoc {
         map: (r.map as unknown[]).map(String),
         objects: Array.isArray(r.objects) ? (r.objects as ObjRec[]) : [],
         lights: Array.isArray(r.lights) ? (r.lights as LightRec[]) : undefined,
-        moss: typeof r.moss === "string" ? r.moss : undefined,
+        roomColor: typeof r.roomColor === "string" ? r.roomColor : undefined,
       };
     }
     if (!rec.idOrder.length) return { ok: false, error: "地图里没有可用房间" };
@@ -414,7 +414,7 @@ export class EditorDoc {
 
     for (const [key, def] of Object.entries(this.rooms)) {
       if (def.map.length !== ROWS) push("error", `应有 ${ROWS} 行，实际 ${def.map.length}`, key);
-      if (def.moss != null && !/^#[0-9a-fA-F]{6}$/.test(def.moss)) push("error", "moss 颜色须是 #rrggbb", key);
+      if (def.roomColor != null && !/^#[0-9a-fA-F]{6}$/.test(def.roomColor)) push("error", "房间配色须是 #rrggbb", key);
       def.map.forEach((line, y) => {
         if (line.length !== COLS) push("error", `第 ${y} 行宽 ${line.length}，应为 ${COLS}`, key, 0, y);
         for (let x = 0; x < line.length; x++) {
