@@ -2,7 +2,8 @@
 // withTestMap(run)：写入 T90.json + 把 gameMap.json 切到 T90 → 跑断言 → 无论成败恢复原字节并删文件。
 // 地形（全部程序化拼装，坐标即契约）：
 //   R91 @(0,0) 主房：走廊 [1,11]-[30,15]（地板=row16 顶=row10）、竖井 [13,0]-[17,10] 通顶、
-//             右缘开口 rows13-15、电梯 TSTELV (5,13)→R92(5,13)
+//             右缘开口 rows13-15、电梯 TSTELV (5,13)→R92(5,13)、
+//             附着层黑幕袋 cols8-10 rows9-12（上叠岩壁/下压走廊空气）
 //   R92 @(1,0) 右邻：左缘开口 rows13-15 对齐、同款走廊 [1,11]-[30,15]、savepoint (5,15)
 //   R93 @(0,-1) 上邻：底缘开口 cols14-16、落点地板=row12（cols10-20）、竖井 [13,13]-[17,16]
 import fs from "node:fs";
@@ -31,6 +32,20 @@ function carve({ top = [], bottom = [], left = [], right = [], boxes = [], chars
   return g.map((r) => r.join(""));
 }
 
+function emptyAttach() {
+  return Array.from({ length: 18 }, () => " ".repeat(32));
+}
+
+/** 在附着层上涂一块矩形（附着类物品如黑幕 @；与瓦片层独立，不取代底下内容）。 */
+function paintAttach(rows, x0, y0, x1, y1, ch = "@") {
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (x >= 0 && x < 32 && y >= 0 && y < 18) rows[y] = rows[y].slice(0, x) + ch + rows[y].slice(x + 1);
+    }
+  }
+  return rows;
+}
+
 export function buildT90() {
   const r91 = carve({
     top: [14, 15, 16],
@@ -41,13 +56,11 @@ export function buildT90() {
     ],
     chars: [
       [18, 16, 24, 16, "*"], // 冰面地板段
-      [8, 9, 10, 10, "@"],   // 黑幕袋（走廊顶上方，跳入即显形）
-    ],
-    objects: [
-      { type: "elevator", id: "TSTELV", location: { room_id: "R91", x: 5, y: 14 }, end: { room_id: "R92", x: 5, y: 13 }, speed: 80, triggeredBy: ["TSTSW"] },
-      { type: "switch", id: "TSTSW", location: { room_id: "R91", x: 10, y: 15 }, controls: ["TSTELV"], reset: 1 },
     ],
   });
+  // 黑幕袋进附着层（cols8-10 rows9-12）：上半叠在岩壁（rows9-10，显形后岩壁不被取代），
+  // 下半压着走廊空气（rows11-12，玩家走进/跳过即显形）
+  const r91Attach = paintAttach(emptyAttach(), 8, 9, 10, 12);
   const r92 = carve({
     left: [13, 14, 15],
     boxes: [[1, 11, 30, 15]],
@@ -67,7 +80,7 @@ export function buildT90() {
     spawn: { room: "R91", x: 150, y: 150 },
     rooms: [
       {
-        id: "R91", x: 0, y: 0, map: r91,
+        id: "R91", x: 0, y: 0, map: r91, attach: r91Attach,
         objects: [
           { type: "elevator", id: "TSTELV", location: { room_id: "R91", x: 5, y: 14 }, end: { room_id: "R92", x: 5, y: 13 }, speed: 80, triggeredBy: ["TSTSW"] },
           { type: "switch", id: "TSTSW", location: { room_id: "R91", x: 10, y: 15 }, controls: ["TSTELV"], reset: 1 },

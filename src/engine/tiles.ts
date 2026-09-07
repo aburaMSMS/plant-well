@@ -1,13 +1,13 @@
 // 瓦片地图与静态几何查询。
 // 出界视为空气：房间靠"在边缘挖洞"连接，洞口处玩家必须能走出房间；
 // 没有洞口的边缘由地图数据自身的边界砖封闭（scripts/validate-rooms.ts 保证）。
-// Ice=可站立的冰面（滑）；Void=黑幕（无碰撞、渲染时按连通区域涂黑）。
+// Ice=可站立的冰面（滑）。@（黑幕）是附着层不是瓦片——Tilemap 不存它，
+// 由 RoomInst.voidGrid 单独持有（可叠在岩壁/物品之上，渲染时整屏涂黑只抠玩家所在区域）。
 export const enum Tile {
   Air = 0,
   Solid = 1,
   Spike = 2,
   Ice = 3,
-  Void = 4,
 }
 
 export class Tilemap {
@@ -27,7 +27,6 @@ export class Tilemap {
           ch === "#" ? Tile.Solid
           : ch === "^" ? Tile.Spike
           : ch === "*" ? Tile.Ice
-          : ch === "@" ? Tile.Void
           : Tile.Air;
       }
     }

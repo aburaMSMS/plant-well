@@ -167,6 +167,7 @@ export class EditorRenderer {
         const picked = rr.active && (i === ui.selection || ui.multiSel.has(`${rr.key}#${i}`));
         this.drawObj(c, o, picked, t, i, { doc, roomId: rr.key });
       });
+      this.drawAttach(c, r.attach);
       this.drawSpawn(c, doc, rr.key);
       if (rr.active) {
         c.globalAlpha = 1;
@@ -230,7 +231,10 @@ export class EditorRenderer {
         this.drawObj(c, ghost, false, t);
         c.globalAlpha = 1;
       } else if (ui.tool === "place" && isHoverRoom && rr.active && ui.palSel?.kind === "tile") {
-        const col = TILES.find((t2) => t2.ch === ui.palSel.ch)?.color ?? "#454f5e";
+        // 空格=附着层擦除笔：红色提示（清除附着）；其余查 TILES 色（含附着黑幕的半透明灰）
+        const col = ui.palSel.ch === " "
+          ? "rgba(230,110,110,0.4)"
+          : TILES.find((t2) => t2.ch === ui.palSel.ch)?.color ?? "#454f5e";
         const p = this.px(ui.hover!.x, ui.hover!.y);
         c.globalAlpha = 0.55;
         c.fillStyle = col;
@@ -250,11 +254,7 @@ export class EditorRenderer {
       for (let x = 0; x < ROOM_COLS; x++) {
         const ch = row[x] ?? ".";
         const p = this.px(x, y);
-        if (ch === "@") {
-          // 黑幕：灰色半透明遮罩（无碰撞，游戏里按连通区域涂黑）
-          c.fillStyle = "rgba(96,106,120,0.45)";
-          c.fillRect(p.x, p.y, ts, ts);
-        } else if (ch === "*") {
+        if (ch === "*") {
           c.fillStyle = "#9fd0e8";
           c.fillRect(p.x, p.y, ts, ts);
           c.fillStyle = "rgba(255,255,255,0.5)";
@@ -274,6 +274,23 @@ export class EditorRenderer {
           c.fillStyle = "#14181f";
           c.fillRect(p.x, p.y, ts, ts);
         }
+      }
+    }
+  }
+
+  /** 附着层渲染（画在瓦片+物件之后）：半透明灰遮罩——盖住底下内容仍隐约可见，编辑时可分辨被遮区域。 */
+  private drawAttach(c: CanvasRenderingContext2D, attach: string[] | undefined): void {
+    if (!attach?.length) return;
+    const ts = this.ts;
+    for (let y = 0; y < ROOM_ROWS; y++) {
+      const row = attach[y] ?? "";
+      for (let x = 0; x < ROOM_COLS; x++) {
+        if (row[x] !== "@") continue;
+        const p = this.px(x, y);
+        c.fillStyle = "rgba(96,106,120,0.45)";
+        c.fillRect(p.x, p.y, ts, ts);
+        c.strokeStyle = "rgba(200,210,225,0.22)";
+        c.strokeRect(p.x + 2.5, p.y + 2.5, ts - 5, ts - 5);
       }
     }
   }

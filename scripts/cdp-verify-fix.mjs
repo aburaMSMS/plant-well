@@ -8,7 +8,7 @@
 //   C 上升连续：竖直上抛穿顶 → 落进上房开口旁地板，px 连续（不出现“最近岩壁”）
 //   D 电梯跨房 + 出舱赠跳
 //   E 冰面滑行（*）：松手惯性滑行一段后减速停住
-//   F 黑幕（@）连通区域：跳入黑幕袋中心格命中该区域
+//   F 黑幕（@）附着层：连通区域 + 玩家进入显形 + 不取代底下岩壁
 import { chromium } from "playwright";
 import { withTestMap } from "./testmap.mjs";
 
@@ -243,7 +243,7 @@ await withTestMap(async () => {
     ok("E3 最终停住且留在 R91", settle.vx === 0 && settle.id === "R91" && settle.px < 310, JSON.stringify(settle));
   }
 
-  console.log("[F] 黑幕连通区域：跳入黑幕袋时中心格命中该区域");
+  console.log("[F] 黑幕（@）附着层：连通区域 + 玩家进入显形 + 不取代底下岩壁");
   {
     const diag = await page.evaluate(() => ({
       upd: String(window.__pw.world.update).slice(0, 26),
@@ -251,7 +251,7 @@ await withTestMap(async () => {
     }));
     console.log("  [F diag]", JSON.stringify(diag));
     await goto("R91");
-    await place(90, 155, 0, -420); // 跳进走廊顶上的黑幕袋（cols8-10 rows9-10）
+    await place(90, 155, 0, -420); // 跳进走廊顶上的黑幕袋（cols8-10 rows9-12，附着层）
     const hit = await page.evaluate(() => {
       const w = window.__pw.world;
       w.debugGoto("R91");
@@ -268,8 +268,10 @@ await withTestMap(async () => {
     console.log("  [F trace] " + JSON.stringify(hit.slice(0, 14)));
     const hitRes = { hit: hit.some((r) => r.region >= 0), minPy: Math.min(...hit.map((r) => r.py)) };
     const regions = await page.evaluate(() => window.__pw.world.room.voidCells.length);
+    const under = await page.evaluate(() => window.__pw.world.room.tiles.get(8, 9)); // 黑幕袋覆盖的岩壁格
     ok("F1 黑幕袋成区（连通 flood fill）", regions >= 1, `regions=${regions}`);
     ok("F2 玩家进入黑幕区域时中心格命中该区域", hitRes.hit, JSON.stringify(hitRes));
+    ok("F3 附着不取代岩壁（覆盖格仍是实心）", under === 1, `tiles.get(8,9)=${under}`);
   }
 
   ok("无页面 JS 错误", errors.length === 0, errors.join(" | ").slice(0, 200));

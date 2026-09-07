@@ -30,7 +30,7 @@ import {
 } from "./entities";
 import { mat } from "../data/materials";
 import { RoomDecor, paletteFor, GLOBAL_LIGHT_DEPTH, type Palette } from "./decor";
-import { ROOMS, ROOM_ID_BY_POS, ROOM_POS, SEED_TOTAL, SPAWN, type ObjDef, type RoomDef } from "../data/maps";
+import { ROOMS, ROOM_ID_BY_POS, ROOM_POS, SEED_TOTAL, SPAWN, emptyAttach, type ObjDef, type RoomDef } from "../data/maps";
 import {
   BEAN_HOLD_TIME,
   BEAN_MAX_TILES,
@@ -362,7 +362,7 @@ export class World {
       this.parkedStalk = null;
     }
     const tiles = new Tilemap(32, 18, def.map);
-    const [voidGrid, voidCells] = this.buildVoidRegions(tiles);
+    const [voidGrid, voidCells] = this.buildVoidRegions(def.attach ?? emptyAttach());
     this.room = {
       cx: pos.x,
       cy: pos.y,
@@ -789,13 +789,13 @@ export class World {
     return false;
   }
 
-  /** 黑幕（@）连通区域：4 连通 flood fill。房间内成区，跨房不连（每房各自成区）。 */
-  private buildVoidRegions(tiles: Tilemap): [number[][], { x: number; y: number }[][]] {
+  /** 黑幕（@）附着层：4 连通 flood fill 成区。从房间 attach 附着层读（与瓦片层独立，可叠在任何地形上）。 */
+  private buildVoidRegions(attach: readonly string[]): [number[][], { x: number; y: number }[][]] {
     const grid: number[][] = Array.from({ length: 18 }, () => new Array(32).fill(-1));
     const cells: { x: number; y: number }[][] = [];
     for (let y = 0; y < 18; y++) {
       for (let x = 0; x < 32; x++) {
-        if (tiles.get(x, y) !== Tile.Void || grid[y][x] >= 0) continue;
+        if (attach[y]?.[x] !== "@" || grid[y][x] >= 0) continue;
         const id = cells.length;
         const list: { x: number; y: number }[] = [];
         const stack = [[x, y]];
@@ -805,7 +805,7 @@ export class World {
           list.push({ x: px, y: py });
           for (const [nx, ny] of [[px - 1, py], [px + 1, py], [px, py - 1], [px, py + 1]]) {
             if (nx < 0 || nx >= 32 || ny < 0 || ny >= 18) continue;
-            if (tiles.get(nx, ny) === Tile.Void && grid[ny][nx] < 0) {
+            if (attach[ny]?.[nx] === "@" && grid[ny][nx] < 0) {
               grid[ny][nx] = id;
               stack.push([nx, ny]);
             }
@@ -817,17 +817,33 @@ export class World {
     return [grid, cells];
   }
 
-  /** 渲染黑幕：非玩家所在区域的黑幕涂纯黑（盖过场景/光照），所在区域正常显形。 */
+  /**
+   * 黑幕附着层渲染（画在一切场景内容之后、HUD 之前）：
+   * - 玩家在某块黑幕区域内：整屏涂黑，只把该区域的格“抠亮”（其余世界全不可见）；
+   * - 不在任何区域：本房所有黑幕格涂黑（世界正常可见，黑幕处是漆黑空洞）。
+   * 附着层可叠在岩壁/物品之上——被遮的地方画什么都被盖掉。
+   */
   private drawVoid(ctx: CanvasRenderingContext2D, resX: number, resY: number): void {
     const grid = this.room.voidGrid;
     const cx = Math.floor(this.player.x / 10);
     const cy = Math.floor(this.player.y / 10);
     const active = cy >= 0 && cy < 18 && cx >= 0 && cx < 32 ? grid[cy][cx] : -1;
     ctx.fillStyle = "#020403";
-    this.room.voidCells.forEach((region, id) => {
-      if (id === active) return;
-      for (const c of region) ctx.fillRect(c.x * 10 - resX, c.y * 10 - resY, 10, 10);
-    });
+    if (active < 0) {
+      for (const region of this.room.voidCells) {
+        for (const c of region) ctx.fillRect(c.x * 10 - resX, c.y * 10 - resY, 10, 10);
+      }
+      return;
+    }
+    // 玩家在黑幕内：先整屏黑，再把所在区域“挖开”（destination-out 露出下层场景）
+    ctx.fillRect(-resX, -resY, ROOM_W, ROOM_H);
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = "rgba(0,0,0,1)";
+    for (const c of this.room.voidCells[active]) {
+      ctx.fillRect(c.x * 10 - resX, c.y * 10 - resY, 10, 10);
+    }
+    ctx.restore();
   }
 
   /** 脚下（或任意点）的地面材质：冰面滑、岩壁稳。缝合感知（越界翻邻房）。 */

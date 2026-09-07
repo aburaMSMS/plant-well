@@ -88,6 +88,11 @@ export interface RoomDef {
   x: number;
   y: number;
   map: string[];
+  /**
+   * 附着层（附着类物品，如黑幕 @）：18 行 × 32 字符，空格=无，与瓦片层完全独立——
+   * 叠在岩壁/物件之上、不取代底下内容。装载时由 normalizeRoom 补齐（原始 JSON 可缺省）。
+   */
+  attach?: string[];
   objects?: ObjDef[];
   /** 房间自带的固定光源（如井口的天光），世界坐标按本房间像素。 */
   lights?: { x: number; y: number; r: number }[];
@@ -116,10 +121,61 @@ export interface MapDef {
   rooms: RoomDef[];
 }
 
+// ===== 附着层归一（装载时统一跑一遍：游戏侧与编辑器消费同一种干净数据） =====
+
+/** 空白附着层：18 行 × 32 空格。 */
+export function emptyAttach(): string[] {
+  return Array.from({ length: 18 }, () => " ".repeat(32));
+}
+
+/**
+ * 房间附着层归一：
+ * 1) 兼容旧数据——map 字符里内联的 @（旧模型会顶掉底下瓦片）摘到 attach 层，底下瓦片按空气兜底；
+ * 2) attach 补齐/裁剪到 18×32，只认 @（其余字符一律视为无附着）。
+ */
+export function normalizeRoomGeo(
+  map: readonly string[],
+  attach?: readonly string[],
+): { map: string[]; attach: string[] } {
+  const outAttach: string[] = [];
+  for (let y = 0; y < 18; y++) {
+    const src = attach?.[y] ?? "";
+    let line = "";
+    for (let x = 0; x < 32; x++) line += src[x] === "@" ? "@" : " ";
+    outAttach.push(line);
+  }
+  const outMap: string[] = [];
+  for (let y = 0; y < 18; y++) {
+    const row = map[y] ?? "";
+    if (!row.includes("@")) {
+      outMap.push(row.slice(0, 32).padEnd(32, "."));
+      continue;
+    }
+    let at = outAttach[y];
+    let line = "";
+    for (let x = 0; x < 32; x++) {
+      const ch = row[x] ?? ".";
+      if (ch === "@") {
+        at = at.slice(0, x) + "@" + at.slice(x + 1);
+        line += ".";
+      } else {
+        line += ch;
+      }
+    }
+    outAttach[y] = at;
+    outMap.push(line);
+  }
+  return { map: outMap, attach: outAttach };
+}
+
 // 全部地图：编译期收集 maps/ 目录下的 .json（一张图一个文件，编辑器保存直接落这里；
 // 新建/删除 JSON 文件后 dev server 自动感知，无需改本文件）。
 const mapMods = import.meta.glob("./maps/*.json", { eager: true }) as Record<string, { default: MapDef }>;
-export const MAP_LIST: MapDef[] = Object.values(mapMods).map((m) => m.default);
+/** 装载归一：每间房跑 normalizeRoomGeo（内联 @ 摘层 + attach 补齐）——此后 attach 必有值。 */
+export const MAP_LIST: MapDef[] = Object.values(mapMods).map((m) => ({
+  ...m.default,
+  rooms: m.default.rooms.map((r) => ({ ...r, ...normalizeRoomGeo(r.map, r.attach) })),
+}));
 
 // 游戏采用哪张地图：编辑器顶栏「★ 设为游戏地图」保存时改写 gameMap.json。
 export const GAME_MAP_ID: string = gameMeta.gameMapId;

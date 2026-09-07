@@ -1,13 +1,13 @@
 // 编辑器文档：MAP_LIST 的内存深拷贝 + 撤销/重做 + 校验。
 // 多地图：maps[] 是全部地图；editMapId 指正在编辑的图；gameMapId 指游戏采用（GAME_MAP_ID）的图。
 // rooms/idOrder 两个 getter 永远指向「正在编辑的图」，编辑器其余代码照旧只管一间间房间（id=Rxx 是唯一房间标识）。
-import { GAME_MAP_ID, MAP_LIST } from "./dataBridge";
+import { GAME_MAP_ID, MAP_LIST, normalizeRoomGeo } from "./dataBridge";
 import { serializeMap } from "./exporter";
 import { propByIdDoc } from "./mats";
 import { num, type ObjRec } from "./palette";
 
 export interface LightRec { x: number; y: number; r: number }
-export interface RoomRec { id: string; x: number; y: number; map: string[]; objects: ObjRec[]; lights?: LightRec[]; roomColor?: string }
+export interface RoomRec { id: string; x: number; y: number; map: string[]; /** 附着层（附着类物品 @ 等，空格=无）：与瓦片层独立 */ attach: string[]; objects: ObjRec[]; lights?: LightRec[]; roomColor?: string }
 /** 出生点/地图元数据里的 room 是房间 id（"R05"），不是网格坐标。 */
 export interface SpawnRec { room: string; x: number; y: number }
 export interface MapRec {
@@ -90,15 +90,17 @@ export class EditorDoc {
     this.baseGame = this.gameMapId;
   }
 
-  private toRec(def: { id: string; name: string; spawn: SpawnRec; rooms: { id: string; x: number; y: number; map: string[]; objects?: ObjRec[]; lights?: LightRec[]; roomColor?: string }[] }): MapRec {
+  private toRec(def: { id: string; name: string; spawn: SpawnRec; rooms: { id: string; x: number; y: number; map: string[]; attach?: string[]; objects?: ObjRec[]; lights?: LightRec[]; roomColor?: string }[] }): MapRec {
     const rec: MapRec = { id: def.id, name: def.name, spawn: { ...def.spawn }, idOrder: [], rooms: {} };
     for (const r of def.rooms) {
       rec.idOrder.push(r.id);
+      const geo = normalizeRoomGeo(r.map, r.attach);
       rec.rooms[r.id] = {
         id: r.id,
         x: r.x,
         y: r.y,
-        map: [...r.map],
+        map: geo.map,
+        attach: geo.attach,
         objects: (r.objects ?? []).map((o) => ({ ...o }) as ObjRec),
         lights: r.lights?.map((l) => ({ ...l })),
         roomColor: r.roomColor,
@@ -131,6 +133,12 @@ export class EditorDoc {
     const d = JSON.parse(json) as { maps?: MapRec[]; editMapId?: string; gameMapId?: string };
     if (!Array.isArray(d.maps) || !d.maps.length) return false;
     this.maps = d.maps;
+    // 旧自动存档的房间可能缺 attach 字段：统一归一补齐（幂等）
+    for (const m of this.maps) {
+      for (const [rid, r] of Object.entries(m.rooms)) {
+        m.rooms[rid] = { ...r, ...normalizeRoomGeo(r.map, r.attach) };
+      }
+    }
     this.editMapId = d.editMapId ?? d.maps[0].id;
     this.gameMapId = d.gameMapId ?? d.maps[0].id;
     this.dirty = true;
@@ -249,7 +257,7 @@ export class EditorDoc {
     const border = "#".repeat(COLS);
     const rid = this.nextRoomId(m);
     m.idOrder.push(rid);
-    m.rooms[rid] = { id: rid, x: 0, y: 0, map: Array.from({ length: ROWS }, () => border), objects: [] };
+    m.rooms[rid] = { id: rid, x: 0, y: 0, map: Array.from({ length: ROWS }, () => border), attach: Array.from({ length: ROWS }, () => " ".repeat(COLS)), objects: [] };
   }
 
   private nextRoomId(m: MapRec): string {
@@ -307,7 +315,7 @@ export class EditorDoc {
     this.mutate(() => {
       const border = "#".repeat(COLS); // 四边全封闭（自己开洞）——首末行也必须是实心
       m.idOrder.push(rid);
-      m.rooms[rid] = { id: rid, x, y, map: Array.from({ length: ROWS }, () => border), objects: [] };
+      m.rooms[rid] = { id: rid, x, y, map: Array.from({ length: ROWS }, () => border), attach: Array.from({ length: ROWS }, () => " ".repeat(COLS)), objects: [] };
     });
     return rid;
   }
@@ -348,7 +356,7 @@ export class EditorDoc {
     const rec: MapRec = { id, name, spawn, idOrder: [], rooms: {} };
     let dropped = 0;
     for (const raw of d.rooms) {
-      const r = raw as { id?: unknown; x?: unknown; y?: unknown; map?: unknown; objects?: unknown; lights?: unknown; roomColor?: unknown };
+      const r = raw as { id?: unknown; x?: unknown; y?: unknown; map?: unknown; attach?: unknown; objects?: unknown; lights?: unknown; roomColor?: unknown };
       if (typeof r.id !== "string" || !/^[A-Z0-9]{3}$/.test(r.id) || !Array.isArray(r.map)) {
         dropped++;
         continue;
@@ -361,11 +369,14 @@ export class EditorDoc {
       }
       if (rec.rooms[r.id]) dropped++; // id 撞车：后者丢弃
       rec.idOrder.push(r.id);
+      // 旧格式地图：内联 @ 摘到附着层；attach 缺省/形状不齐时补齐
+      const geo = normalizeRoomGeo((r.map as unknown[]).map(String), Array.isArray(r.attach) ? (r.attach as string[]) : undefined);
       rec.rooms[r.id] = {
         id: r.id,
         x,
         y,
-        map: (r.map as unknown[]).map(String),
+        map: geo.map,
+        attach: geo.attach,
         objects: Array.isArray(r.objects) ? (r.objects as ObjRec[]) : [],
         lights: Array.isArray(r.lights) ? (r.lights as LightRec[]) : undefined,
         roomColor: typeof r.roomColor === "string" ? r.roomColor : undefined,
@@ -418,7 +429,15 @@ export class EditorDoc {
       def.map.forEach((line, y) => {
         if (line.length !== COLS) push("error", `第 ${y} 行宽 ${line.length}，应为 ${COLS}`, key, 0, y);
         for (let x = 0; x < line.length; x++) {
-          if (!"#.".includes(line[x])) push("error", `非法字符 '${line[x]}'`, key, x, y);
+          if (!"#.@*".includes(line[x])) push("error", `非法字符 '${line[x]}'（可用 # . @ *）`, key, x, y);
+        }
+      });
+      // 附着层：18 行 × 32 列，只认 @ 与空格
+      if (def.attach.length !== ROWS) push("error", `附着层应有 ${ROWS} 行，实际 ${def.attach.length}`, key);
+      def.attach.forEach((line, y) => {
+        if (line.length !== COLS) push("error", `附着层第 ${y} 行宽 ${line.length}，应为 ${COLS}`, key, 0, y);
+        for (let x = 0; x < line.length; x++) {
+          if (line[x] !== "@" && line[x] !== " ") push("error", `附着层非法字符 '${line[x]}'（可用 @ 与空格）`, key, x, y);
         }
       });
 

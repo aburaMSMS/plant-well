@@ -125,6 +125,13 @@ function saveEngineFiles(): Plugin {
 
 export default defineConfig({
   plugins: [saveEngineFiles()],
+  // dev server 文件监视：排除探针/CDP 的浏览器 profile（Chromium 会高频改写 Cookies 等，
+  // Windows 上 fs.watch 盯到会 EBUSY 直接崩掉整个 dev server）
+  server: {
+    watch: {
+      ignored: ["**/.cdpprofile/**"],
+    },
+  },
   // 编辑器也打进产物（线上 = 可看/可导出的查看器；写回通道是 dev 中间件，线上不存在，
   // 保存会走剪贴板/下载兜底并明确提示）。
   build: {

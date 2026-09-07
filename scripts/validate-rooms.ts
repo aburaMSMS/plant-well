@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-interface RoomRec { id: string; x: number; y: number; map: string[]; objects?: any[] }
+interface RoomRec { id: string; x: number; y: number; map: string[]; attach?: string[]; objects?: any[] }
 interface MapRec { id: string; name?: string; spawn: { room: string; x: number; y: number }; rooms: RoomRec[] }
 
 const gameMeta = JSON.parse(readFileSync("src/data/gameMap.json", "utf8")) as { gameMapId: string };
@@ -67,9 +67,22 @@ for (const m of MAP_LIST) {
     def.map.forEach((line: string, y: number) => {
       if (line.length !== COLS) fail(`${where}: 第 ${y} 行应有 ${COLS} 字符，实际 ${line.length}`);
       for (const ch of line) {
-        if (!"#.".includes(ch)) fail(`${where}: 第 ${y} 行有非法字符 '${ch}'（尖刺请用 objects 里的 spike 物件）`);
+        if (!"#.@*".includes(ch)) fail(`${where}: 第 ${y} 行有非法字符 '${ch}'（可用 # . @ *）`);
       }
     });
+    // 附着层（附着类物品，@=黑幕，空格=无）：与瓦片层独立存储，不取代底下内容
+    if (def.attach !== undefined) {
+      if (def.attach.length !== ROWS) fail(`${where}: 附着层应有 ${ROWS} 行，实际 ${def.attach.length}`);
+      def.attach.forEach((line: string, y: number) => {
+        if (line.length !== COLS) fail(`${where}: 附着层第 ${y} 行应有 ${COLS} 字符，实际 ${line.length}`);
+        for (const ch of line) {
+          if (ch !== "@" && ch !== " ") fail(`${where}: 附着层第 ${y} 行有非法字符 '${ch}'（可用 @ 与空格）`);
+        }
+      });
+    }
+    if (def.map.some((line: string) => line.includes("@"))) {
+      warn(`${where}: map 里还有内联 @（旧格式，会顶掉底下瓦片）——编辑器重存一次即自动迁到 attach 附着层`);
+    }
 
     if (!/^[A-Z0-9]{3}$/.test(def.id)) fail(`${where}: 房间 id 非法（应为 3 位大写字母/数字）`);
     if (def.x !== Math.trunc(def.x) || def.y !== Math.trunc(def.y)) fail(`${where}: 网格坐标 x/y 必须是整数`);

@@ -5,6 +5,8 @@
 // 工具：选择（点选/拖动/框选多选）· 放置/画笔 · 矩形（建筑类拖拽画矩形填充）。橡皮已并入「空气」材料。
 import { EditorDoc } from "./doc";
 import {
+  ATTACH_ERASE_CH,
+  BUILD_TILES,
   CATEGORIES,
   ITEM_IDS,
   OBJ_SPECS,
@@ -212,6 +214,13 @@ function createRoom(cx: number, cy: number): void {
 function paintRaw(x: number, y: number, v: string): void {
   const room = doc.rooms[curKey];
   if (!room) return;
+  // 附着类画笔（@=黑幕 / 空格=清除附着）：写 attach 网格——与瓦片层独立，不取代底下内容
+  if (v === "@" || v === ATTACH_ERASE_CH) {
+    const atRow = room.attach[y] ?? "";
+    if (atRow[x] === v) return;
+    room.attach[y] = atRow.slice(0, x) + v + atRow.slice(x + 1);
+    return;
+  }
   const row = room.map[y];
   if (row[x] === v) return;
   room.map[y] = row.slice(0, x) + v + row.slice(x + 1);
@@ -712,10 +721,20 @@ const expandedCats = new Set<string>(["build"]);
 
 /** 建筑类特例：画笔瓦片（岩壁/空气/冰块/黑幕）不是物件，与分类一起列出。空气=擦除（画笔/矩形通用）。
  *  单一来源 = palette.TILES，这里只做展示映射——新增瓦片改 TILES 一处即可。 */
-const BUILD_ENTRIES = TILES.map((t) => ({ ch: t.ch, label: t.short, color: t.color }));
+const BUILD_ENTRIES = BUILD_TILES.map((t) => ({ ch: t.ch, label: t.short, color: t.color }));
+/** 附着类画笔：附着物品（@…）+ 擦除（空格清掉该格附着物）。 */
+const ATTACH_ENTRIES = [
+  ...TILES.filter((t) => t.layer === "attach").map((t) => ({ ch: t.ch, label: t.short, color: t.color })),
+  { ch: ATTACH_ERASE_CH, label: "清除附着", color: "rgba(96,106,120,0.18)" },
+];
+
+function tileLabel(ch: string): string {
+  return TILES.find((t) => t.ch === ch)?.short ?? (ch === ATTACH_ERASE_CH ? "清除附着" : ch);
+}
 
 function catCount(catId: string): number {
   if (catId === "build") return BUILD_ENTRIES.length;
+  if (catId === "attach") return ATTACH_ENTRIES.length;
   return OBJ_SPECS.filter((sp) => sp.cat === catId && !sp.hidden).length;
 }
 
@@ -746,6 +765,23 @@ function buildObjPalette(): void {
           palSel = { kind: "tile", ch: t.ch };
           // 只换材料不抢工具：已在 画笔/矩形 时保持（矩形=拖拽填充该材料）；
           // 在选择等其它工具时才切到画笔（点新材料直接开画的直觉）
+          if (tool !== "place" && tool !== "rect") setTool("place");
+          else refreshAll();
+        });
+        box.append(b);
+      }
+      continue;
+    }
+
+    if (cat.id === "attach") {
+      // 附着类：画进房间 attach 网格（叠在瓦片/物件之上，不取代底下内容）
+      for (const t of ATTACH_ENTRIES) {
+        const b = document.createElement("button");
+        b.dataset.ch = t.ch;
+        b.innerHTML = `<span class="chip" style="background:${t.color}"></span>${t.label}<kbd>${t.ch === ATTACH_ERASE_CH ? "␣" : t.ch}</kbd>`;
+        b.addEventListener("click", () => {
+          brushTile = t.ch;
+          palSel = { kind: "tile", ch: t.ch };
           if (tool !== "place" && tool !== "rect") setTool("place");
           else refreshAll();
         });
@@ -946,7 +982,16 @@ function drawMapCell(c: CanvasRenderingContext2D, cx: number, cy: number, px: nu
     const row = room.map[ty] ?? "";
     for (let tx = 0; tx < 32; tx++) {
       const ch = row[tx] ?? ".";
-      c.fillStyle = ch === "#" ? "#3d4653" : ch === "*" ? "#7fb2cc" : ch === "@" ? "#2a3138" : "#10151c";
+      c.fillStyle = ch === "#" ? "#3d4653" : ch === "*" ? "#7fb2cc" : "#10151c";
+      c.fillRect(ox + tx, oy + ty, 1, 1);
+    }
+  }
+  // 附着层（黑幕等）：半透明灰盖在缩略图上
+  for (let ty = 0; ty < 18; ty++) {
+    const arow = room.attach?.[ty] ?? "";
+    for (let tx = 0; tx < 32; tx++) {
+      if (arow[tx] !== "@") continue;
+      c.fillStyle = "rgba(96,106,120,0.6)";
       c.fillRect(ox + tx, oy + ty, 1, 1);
     }
   }
@@ -1159,17 +1204,28 @@ function refreshInspector(): void {
     let cardLabel = objSpec(placeType).label;
     let cardHint = objSpec(placeType).hint ?? "";
     if (palSel.kind === "tile") {
-      const matName = brushTile === "#" ? "岩壁" : "空气";
-      title = tool === "rect" ? "矩形填充" : placing ? "铺设" : "检查器";
-      cardLabel = matName;
-      cardHint =
-        brushTile === "#"
+      const isAttach = brushTile === "@" || brushTile === ATTACH_ERASE_CH;
+      title = tool === "rect" ? "矩形填充" : placing ? (isAttach ? "涂抹附着" : "铺设") : "检查器";
+      cardLabel = tileLabel(brushTile);
+      cardHint = isAttach
+        ? brushTile === "@"
+          ? tool === "rect"
+            ? "拖拽画矩形涂黑幕。附着层独立于瓦片：不取代底下的岩壁/物件。"
+            : "长按拖动涂黑幕（附着层）。连通的黑幕视为一块：不在其中时该块完全涂黑，进入才显形且其余区域全黑。"
+          : tool === "rect"
+            ? "拖拽矩形清除该区域附着物。"
+            : "长按拖动清除附着物（不动底下瓦片/物件）。"
+        : brushTile === "#"
           ? tool === "rect"
             ? "拖拽画矩形填充实心岩。长按铺设请用「放置」。"
             : "长按拖动铺设实心岩。右键拖动可平移画布看到邻房。"
-          : tool === "rect"
-            ? "拖拽画矩形擦成空气。"
-            : "长按拖动把涂到的格变成空气（原橡皮）。";
+          : brushTile === "*"
+            ? tool === "rect"
+              ? "拖拽画矩形铺冰面。"
+              : "长按拖动铺冰面（走上去更快，松手会滑）。"
+            : tool === "rect"
+              ? "拖拽画矩形擦成空气。"
+              : "长按拖动把涂到的格变成空气（原橡皮）。";
     } else {
       title = placing ? "放置" : "检查器";
     }
@@ -1421,12 +1477,12 @@ function refreshStatusStatic(): void {
   let toolText = `${TOOL_LABEL[tool]}`;
   if (tool === "place") {
     toolText += palSel.kind === "tile"
-      ? `：${brushTile === "#" ? "岩壁" : "空气"}（长按铺设）`
+      ? `：${tileLabel(brushTile)}（长按${brushTile === "@" || brushTile === ATTACH_ERASE_CH ? "涂抹" : "铺设"}）`
       : placeType === "prop"
         ? `：自定义物件 ${propByIdDoc(placePropId)?.label ?? placePropId}`
         : `：${objSpec(placeType).label}`;
   } else if (tool === "rect" && palSel.kind === "tile") {
-    toolText += `：${brushTile === "#" ? "岩壁" : "空气"}（拖拽画矩形）`;
+    toolText += `：${tileLabel(brushTile)}（拖拽画矩形）`;
   }
   $("#stTool").textContent = toolText;
   const issues = doc.validate();

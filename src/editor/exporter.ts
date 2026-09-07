@@ -12,6 +12,8 @@ export function serializeMap(m: MapRec): string {
       const out: Record<string, unknown> = { id: r.id, x: r.x, y: r.y, map: r.map, objects: r.objects };
       if (r.lights?.length) out.lights = r.lights;
       if (r.roomColor) out.roomColor = r.roomColor;
+      // 附着层：有过附着物的房间才写（保持 JSON 精简，与瓦片层独立存储）
+      if (r.attach?.some((row) => row.includes("@"))) out.attach = r.attach;
       return out;
     })
     .filter((r) => r != null);

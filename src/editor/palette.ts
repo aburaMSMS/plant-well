@@ -34,6 +34,7 @@ export const ITEM_IDS = ["whip", "bubble", "flute", "bean"] as const;
 /** 物件分类：编辑器调色板按类折叠，展开方可放置。 */
 export const CATEGORIES = [
   { id: "build", label: "建筑类", hint: "地形砖与结构" },
+  { id: "attach", label: "附着类", hint: "不占空间的遮罩层：叠在任何地块/物件之上、不取代底下内容（黑幕、雾等）" },
   { id: "switch", label: "开关类", hint: "机关与触发源" },
   { id: "scene", label: "场景类", hint: "无碰撞或弱交互的摆设" },
   { id: "light", label: "光源类", hint: "自带光源的发光物：位置即光源中心，半径/亮度可调" },
@@ -45,12 +46,26 @@ export const CATEGORIES = [
 ] as const;
 export type CatId = (typeof CATEGORIES)[number]["id"];
 
-export const TILES = [
+/** 建筑/附着物品规格：layer="attach" = 附着类（画进房间 attach 网格，与瓦片层独立、不取代底下内容）。 */
+export interface TileSpec {
+  ch: string;
+  label: string;
+  short: string;
+  color: string;
+  layer?: "attach";
+}
+
+export const TILES: readonly TileSpec[] = [
   { ch: "#", label: "实心岩壁", short: "岩壁", color: "#454f5e" },
   { ch: ".", label: "空气", short: "空气", color: "#14181f" },
   { ch: "*", label: "冰块", short: "冰块", color: "#9fd0e8" },
-  { ch: "@", label: "黑幕", short: "黑幕", color: "rgba(96,106,120,0.45)" },
-] as const; // 尖刺不是瓦片：一律用伤害类的地刺物件
+  { ch: "@", label: "黑幕", short: "黑幕", color: "rgba(96,106,120,0.45)", layer: "attach" },
+]; // 尖刺不是瓦片：一律用伤害类的地刺物件
+
+/** 建筑类画笔（不含附着类）。 */
+export const BUILD_TILES = TILES.filter((t) => t.layer !== "attach");
+/** 附着层的擦除笔：写空格（" "）清掉该格附着物——附着层不占瓦片格，擦除也独立。 */
+export const ATTACH_ERASE_CH = " ";
 
 export const OBJ_SPECS: ObjSpec[] = [
   {
