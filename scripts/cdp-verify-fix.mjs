@@ -274,6 +274,40 @@ await withTestMap(async () => {
     ok("F3 附着不取代岩壁（覆盖格仍是实心）", under === 1, `tiles.get(8,9)=${under}`);
   }
 
+  console.log("[F] 黑幕显形像素级：玩家在区域内 → 区域显形、区域外全黑（回归 destination-out 全黑 bug）");
+  {
+    const pix = await page.evaluate(() => {
+      const w = window.__pw.world;
+      w.debugGoto("R91");
+      window.__step(70); // 落稳 + 吸收任何入场黑场
+      const p = w.player;
+      p.x = 95; p.y = 115; p.vx = 0; p.vy = 0; // 黑幕袋空气格（col9 row11，附着层区域 rows9-12）
+      for (let i = 0; i < 2; i++) window.__step(1); // 重力刚起步，中心仍在区域格内
+      const cx = Math.floor(p.x / 10), cy = Math.floor(p.y / 10);
+      const active = w.room.voidGrid[cy][cx];
+      // 手动出一帧（无头 rAF 靠不住）；画布内部 320×180 = 房间像素（相机吸附时 resX=0）
+      const ctx = document.querySelector("#screen").getContext("2d");
+      w.draw(ctx);
+      const img = ctx.getImageData(0, 0, 320, 180).data;
+      const bright = (x0, y0, x1, y1) => {
+        let best = -1;
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+          const i = (y * 320 + x) * 4;
+          best = Math.max(best, img[i] + img[i + 1] + img[i + 2]);
+        }
+        return best;
+      };
+      return {
+        active,
+        inside: bright(78, 98, 116, 132),  // 玩家所在区域格：能看到玩家=明显亮（bug 态=被擦穿=全 0）
+        outside: bright(10, 120, 50, 160), // 走廊左段（区域外=漆黑，含噪点/晕影余量）
+        px: +p.x.toFixed(1), py: +p.y.toFixed(1),
+      };
+    });
+    ok("F4 玩家在区域内：所在区域显形（玩家像素可见）", pix.active >= 0 && pix.inside > 100, JSON.stringify(pix));
+    ok("F5 玩家在区域内：区域外世界全黑", pix.active >= 0 && pix.outside < 60, JSON.stringify(pix));
+  }
+
   ok("无页面 JS 错误", errors.length === 0, errors.join(" | ").slice(0, 200));
   await browser.close();
   console.log(fail === 0 ? `\nPASS ${pass}/${pass + fail}` : `\nFAIL ${fail} failed, ${pass} passed`);

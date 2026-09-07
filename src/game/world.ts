@@ -835,14 +835,17 @@ export class World {
       }
       return;
     }
-    // 玩家在黑幕内：先整屏黑，再把所在区域“挖开”（destination-out 露出下层场景）
-    ctx.fillRect(-resX, -resY, ROOM_W, ROOM_H);
+    // 玩家在黑幕内：整屏涂黑、只把所在区域"留亮"——用 clip even-odd（大矩形减去区域格）。
+    // 不能用 destination-out 抠主画布：它会把已画好的场景像素一并擦成透明，
+    // 透出的是页面底色——看起来仍是全屏黑（用户实测 bug）。
     ctx.save();
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.fillStyle = "rgba(0,0,0,1)";
+    ctx.beginPath();
+    ctx.rect(-resX, -resY, ROOM_W, ROOM_H);
     for (const c of this.room.voidCells[active]) {
-      ctx.fillRect(c.x * 10 - resX, c.y * 10 - resY, 10, 10);
+      ctx.rect(c.x * 10 - resX, c.y * 10 - resY, 10, 10);
     }
+    ctx.clip("evenodd");
+    ctx.fillRect(-resX, -resY, ROOM_W, ROOM_H);
     ctx.restore();
   }
 
