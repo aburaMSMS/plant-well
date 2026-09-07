@@ -21,7 +21,7 @@
 - `resolveEmbed` 回归单一职责：仅 embeddedAt 兜底（nearestLanding 全房分级扫描），fromBelow/groundBelow 已删。
 - **出舱赠跳**：player.exitJump（entities.ts 吐出处置 true；player.ts 跳跃条件 `coyote>0 || exitJump`，落地清零）。
 **编辑器**：选点设出生点（spawnPick 模式：armed 时画布点击=setSpawnRoom+setSpawnPos，Esc 取消）。
-**探针**：`scripts/testmap.mjs`（T90：R91 走廊+竖井+右开口、R92 对齐走廊+savepoint、R93 高腔体+底开口；电梯 TSTELV R91→R92）+ `cdp-verify-fix.mjs` 14 项。**测试纪律（用户明令）**：以后测试一律用 T90 这类专用图，不依赖 M01（用户会随时改 M01）。
+**探针**：`scripts/testmap.mjs`（T90：R91 走廊+竖井+右开口、R92 对齐走廊+savepoint、R93 高腔体+底开口；电梯 TSTELV R91→R92）+ `cdp-verify-fix.mjs` 14 项。**测试纪律（用户明令）**：以后测试一律用 T90 这类专用图，不依赖 M01（用户会随时改 M01）。**⚠ 探针会写 gameMap.json → 用户正在编辑的编辑器会整页刷新丢未保存内容——用户可能在实时编辑，跑探针前先确认（或跑完提醒用户刷新/检查未保存标记）。
 
 ## ⚠ 第四十一批（2026-09-06）：房间标识全面 Rxx 化 + 五项体验需求
 

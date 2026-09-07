@@ -60,6 +60,9 @@ interface RoomInst {
   entities: Entity[];
   solids: Rect[];
   decor: RoomDecor;
+  /** 黑幕连通区域：voidGrid[y][x]=区域序号（-1=非黑幕）；voidCells[序号]=该区域的格列表。 */
+  voidGrid: number[][];
+  voidCells: { x: number; y: number }[][];
 }
 
 interface SaveData {
@@ -352,14 +355,18 @@ export class World {
       }
       this.parkedStalk = null;
     }
+    const tiles = new Tilemap(32, 18, def.map);
+    const [voidGrid, voidCells] = this.buildVoidRegions(tiles);
     this.room = {
       cx: pos.x,
       cy: pos.y,
       def,
-      tiles: new Tilemap(32, 18, def.map),
+      tiles,
       entities,
       solids: [],
-      decor: new RoomDecor(id, new Tilemap(32, 18, def.map), pos.y / 6),
+      decor: new RoomDecor(id, tiles, pos.y / 6),
+      voidGrid,
+      voidCells,
     };
     // 挂在视野外的跨房载具：家房被加载就归位（同 id 的数据原件让位给它）
     if (this.detached.length) {
@@ -768,24 +775,70 @@ export class World {
   }
 
   solidAtPx(x: number, y: number): boolean {
-    if (this.room.tiles.solidAtPx(x, y)) return true;
-    // 房界缝合：越界查询翻查邻房边缘瓦片。邻房是岩的地方房界就是墙（跳头不会钻进上房岩壁，
-    // 起跳擦过小洞口也不会被“吸”进上房——脚下有实心就该落回去），邻房开口才是通路。
-    // 只对越界查询生效，房内热路径零开销。
-    if (x < 0 || x >= ROOM_W || y < 0 || y >= ROOM_H) {
-      const nid = ROOM_ID_BY_POS[`${this.cx + (x < 0 ? -1 : x >= ROOM_W ? 1 : 0)},${this.cy + (y < 0 ? -1 : y >= ROOM_H ? 1 : 0)}`];
-      const tm = nid ? this.seamTiles(nid) : null;
-      if (tm) {
-        const nx = ((x % ROOM_W) + ROOM_W) % ROOM_W;
-        const ny = ((y % ROOM_H) + ROOM_H) % ROOM_H;
-        if (tm.solidAtPx(nx, ny)) return true;
-      }
-    }
+    if (this.tileAtWithSeam(x, y) === Tile.Solid || this.tileAtWithSeam(x, y) === Tile.Ice) return true;
     for (const r of this.room.solids) {
       if (r.oneWay) continue; // 单向平台不是墙：上升/横移/视线都可穿过
       if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return true;
     }
     return false;
+  }
+
+  /** 黑幕（@）连通区域：4 连通 flood fill。房间内成区，跨房不连（每房各自成区）。 */
+  private buildVoidRegions(tiles: Tilemap): [number[][], { x: number; y: number }[][]] {
+    const grid: number[][] = Array.from({ length: 18 }, () => new Array(32).fill(-1));
+    const cells: { x: number; y: number }[][] = [];
+    for (let y = 0; y < 18; y++) {
+      for (let x = 0; x < 32; x++) {
+        if (tiles.get(x, y) !== Tile.Void || grid[y][x] >= 0) continue;
+        const id = cells.length;
+        const list: { x: number; y: number }[] = [];
+        const stack = [[x, y]];
+        grid[y][x] = id;
+        while (stack.length) {
+          const [px, py] = stack.pop()!;
+          list.push({ x: px, y: py });
+          for (const [nx, ny] of [[px - 1, py], [px + 1, py], [px, py - 1], [px, py + 1]]) {
+            if (nx < 0 || nx >= 32 || ny < 0 || ny >= 18) continue;
+            if (tiles.get(nx, ny) === Tile.Void && grid[ny][nx] < 0) {
+              grid[ny][nx] = id;
+              stack.push([nx, ny]);
+            }
+          }
+        }
+        cells.push(list);
+      }
+    }
+    return [grid, cells];
+  }
+
+  /** 渲染黑幕：非玩家所在区域的黑幕涂纯黑（盖过场景/光照），所在区域正常显形。 */
+  private drawVoid(ctx: CanvasRenderingContext2D, resX: number, resY: number): void {
+    const grid = this.room.voidGrid;
+    const cx = Math.floor(this.player.x / 10);
+    const cy = Math.floor(this.player.y / 10);
+    const active = cy >= 0 && cy < 18 && cx >= 0 && cx < 32 ? grid[cy][cx] : -1;
+    ctx.fillStyle = "#020403";
+    this.room.voidCells.forEach((region, id) => {
+      if (id === active) return;
+      for (const c of region) ctx.fillRect(c.x * 10 - resX, c.y * 10 - resY, 10, 10);
+    });
+  }
+
+  /** 脚下（或任意点）的地面材质：冰面滑、岩壁稳。缝合感知（越界翻邻房）。 */
+  groundMaterial(x: number, y: number): "ice" | "solid" | "none" {
+    const t = this.tileAtWithSeam(x, y);
+    return t === Tile.Ice ? "ice" : t === Tile.Solid ? "solid" : "none";
+  }
+
+  /** 缝合感知的瓦片查询：越界坐标翻查邻房边缘瓦片（与 solidAtPx 同一套偏移规则）。 */
+  private tileAtWithSeam(x: number, y: number): Tile {
+    if (x >= 0 && x < ROOM_W && y >= 0 && y < ROOM_H) return this.room.tiles.get(Math.floor(x / 10), Math.floor(y / 10));
+    const nid = ROOM_ID_BY_POS[`${this.cx + (x < 0 ? -1 : x >= ROOM_W ? 1 : 0)},${this.cy + (y < 0 ? -1 : y >= ROOM_H ? 1 : 0)}`];
+    const tm = nid ? this.seamTiles(nid) : null;
+    if (!tm) return Tile.Air;
+    const nx = ((x % ROOM_W) + ROOM_W) % ROOM_W;
+    const ny = ((y % ROOM_H) + ROOM_H) % ROOM_H;
+    return tm.get(Math.floor(nx / 10), Math.floor(ny / 10));
   }
 
   /** 邻房边缘瓦片缓存（按房间 id，瓦片静态，进程内缓存即可）。 */
@@ -1582,6 +1635,8 @@ export class World {
     decor.drawFog(ctx, this.time, GLOBAL_LIGHT_DEPTH);
     decor.drawShaftsFront(ctx, this.time);
     decor.drawDynamicGlow(ctx, this.time, GLOBAL_LIGHT_DEPTH);
+    // 黑幕：非所在区域涂纯黑（盖过光照与自发光——没进去就是一片漆黑）
+    this.drawVoid(ctx, this.camX - this.cx * ROOM_W, this.camY - this.cy * ROOM_H);
     this.drawAmbientPulse(ctx, lightPal.glow, GLOBAL_LIGHT_DEPTH);
     decor.drawGrade(ctx);
     this.drawVignette(ctx, lightPal.dark, sd);
@@ -1827,6 +1882,20 @@ export class World {
     for (let cy = 0; cy < 18; cy++) {
       for (let cx = 0; cx < 32; cx++) {
         const tile = t.get(cx, cy);
+        if (tile === Tile.Ice) {
+          // 冰面：淡青底 + 顶部高光 + 斜向反光纹，一眼读出“滑”
+          const h = ((cx * 2654435761) ^ (cy * 40503)) >>> 0;
+          ctx.fillStyle = h % 5 === 0 ? "#bfe2f2" : "#a9d4e8";
+          ctx.fillRect(cx * 10, cy * 10, 10, 10);
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          ctx.fillRect(cx * 10, cy * 10, 10, 2);
+          ctx.fillStyle = "rgba(255,255,255,0.22)";
+          ctx.fillRect(cx * 10 + (h % 5), cy * 10 + 4 + (h % 3), 4, 1);
+          ctx.fillStyle = "rgba(70,120,150,0.35)";
+          ctx.fillRect(cx * 10 + 9, cy * 10, 1, 10);
+          ctx.fillRect(cx * 10, cy * 10 + 9, 10, 1);
+          continue;
+        }
         if (tile === Tile.Solid) {
           const above = t.get(cx, cy - 1);
           const below = t.get(cx, cy + 1);

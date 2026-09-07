@@ -12,17 +12,21 @@ const MAPS_DIR = join(process.cwd(), "src", "data", "maps");
 const T90_PATH = join(MAPS_DIR, "T90.json");
 const GAME_MAP = join(process.cwd(), "src", "data", "gameMap.json");
 
-function carve({ top = [], bottom = [], left = [], right = [], boxes = [] }) {
+function carve({ top = [], bottom = [], left = [], right = [], boxes = [], chars = [] }) {
   const g = Array.from({ length: 18 }, () => Array.from({ length: 32 }, () => "#"));
-  const open = (x, y) => {
-    if (x >= 0 && x < 32 && y >= 0 && y < 18) g[y][x] = ".";
+  const set = (x, y, ch) => {
+    if (x >= 0 && x < 32 && y >= 0 && y < 18) g[y][x] = ch;
   };
+  const open = (x, y) => set(x, y, ".");
   for (const x of top) open(x, 0);
   for (const x of bottom) open(x, 17);
   for (const y of left) open(0, y);
   for (const y of right) open(31, y);
   for (const [x0, y0, x1, y1] of boxes) {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) open(x, y);
+  }
+  for (const [x0, y0, x1, y1, ch] of chars) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, ch);
   }
   return g.map((r) => r.join(""));
 }
@@ -34,6 +38,10 @@ export function buildT90() {
     boxes: [
       [1, 11, 30, 15], // 走廊
       [13, 0, 17, 10], // 竖井（顶内段）
+    ],
+    chars: [
+      [18, 16, 24, 16, "*"], // 冰面地板段
+      [8, 9, 10, 10, "@"],   // 黑幕袋（走廊顶上方，跳入即显形）
     ],
     objects: [
       { type: "elevator", id: "TSTELV", location: { room_id: "R91", x: 5, y: 14 }, end: { room_id: "R92", x: 5, y: 13 }, speed: 80 },

@@ -250,7 +250,16 @@ export class EditorRenderer {
       for (let x = 0; x < ROOM_COLS; x++) {
         const ch = row[x] ?? ".";
         const p = this.px(x, y);
-        if (ch === "#") {
+        if (ch === "@") {
+          // 黑幕：灰色半透明遮罩（无碰撞，游戏里按连通区域涂黑）
+          c.fillStyle = "rgba(96,106,120,0.45)";
+          c.fillRect(p.x, p.y, ts, ts);
+        } else if (ch === "*") {
+          c.fillStyle = "#9fd0e8";
+          c.fillRect(p.x, p.y, ts, ts);
+          c.fillStyle = "rgba(255,255,255,0.5)";
+          c.fillRect(p.x, p.y, ts, Math.max(1, ts / 6));
+        } else if (ch === "#") {
           c.fillStyle = "#3d4653";
           c.fillRect(p.x, p.y, ts, ts);
           if ((map[y - 1]?.[x] ?? ".") !== "#") {

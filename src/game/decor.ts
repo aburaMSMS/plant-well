@@ -733,6 +733,16 @@ export class RoomDecor {
     ctx.restore();
   }
 
+  /** 主题色染：把场景物件的基础色向本房苔藓色混合 k 比例（0~1）——
+   *  房间主题影响场景类观感但不完全变色（用户需求：倾向一点）。 */
+  tint(base: string, k = 0.35): string {
+    const n = parseInt(base.replace("#", ""), 16);
+    const br = (n >> 16) & 255, bg = (n >> 8) & 255, bb = n & 255;
+    const m = this.mossColor.split(",").map((v) => Number(v));
+    const mix = (a: number, b: number) => Math.round(a + (b - a) * k);
+    return `rgb(${mix(br, m[0])},${mix(bg, m[1])},${mix(bb, m[2])})`;
+  }
+
   /** 环境微光：装饰灯/萤光苔/孢子/背景星点的慢脉搏光晕。光照后 additive。 */
   /** 自发光点缀：发光苔藓 + 萤火虫/蜡烛/晶石/吊灯。在光照层之后调用（lighter 叠加）。 */
   drawGlowScene(ctx: CanvasRenderingContext2D, time: number): void {

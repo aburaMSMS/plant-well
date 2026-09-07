@@ -947,7 +947,7 @@ function drawMapCell(c: CanvasRenderingContext2D, cx: number, cy: number, px: nu
     const row = room.map[ty] ?? "";
     for (let tx = 0; tx < 32; tx++) {
       const ch = row[tx] ?? ".";
-      c.fillStyle = ch === "#" ? "#3d4653" : "#10151c";
+      c.fillStyle = ch === "#" ? "#3d4653" : ch === "*" ? "#7fb2cc" : ch === "@" ? "#2a3138" : "#10151c";
       c.fillRect(ox + tx, oy + ty, 1, 1);
     }
   }

@@ -6,6 +6,9 @@ import {
   AIR_ACCEL,
   CLIMB_SPEED,
   FRICTION,
+  ICE_ACCEL_MUL,
+  ICE_FRICTION,
+  ICE_SPEED_MUL,
   GRAVITY,
   GROUND_ACCEL,
   JUMP_BUFFER,
@@ -162,14 +165,16 @@ export class Player {
 
     // ---- 水平 ----
     const dir = (input.held("right") ? 1 : 0) - (input.held("left") ? 1 : 0);
-    const speed = MOVE_SPEED * (this.shieldT > 0 ? 0.65 : 1);
+    // 冰面：移速略增、起步加速放缓、松手滑行一小段（反向移动可刹车）
+    const onIce = this.grounded && world.groundMaterial(this.x, this.y + 5) === "ice";
+    const speed = MOVE_SPEED * (this.shieldT > 0 ? 0.65 : 1) * (onIce ? ICE_SPEED_MUL : 1);
     if (dir !== 0) {
       this.facing = dir;
-      const accel = (this.grounded ? GROUND_ACCEL : AIR_ACCEL) * dt;
+      const accel = (this.grounded ? GROUND_ACCEL * (onIce ? ICE_ACCEL_MUL : 1) : AIR_ACCEL) * dt;
       this.vx += dir * accel;
       this.vx = Math.max(-speed, Math.min(speed, this.vx));
     } else if (this.grounded) {
-      const f = FRICTION * dt;
+      const f = (onIce ? ICE_FRICTION : FRICTION) * dt;
       this.vx = Math.abs(this.vx) <= f ? 0 : this.vx - Math.sign(this.vx) * f;
     }
 
@@ -178,7 +183,12 @@ export class Player {
     this.jumpBuf = Math.max(0, this.jumpBuf - dt);
     this.coyote = this.grounded ? COYOTE_TIME : Math.max(0, this.coyote - dt);
     // 电梯出舱赠跳：出笼一次空中的免费跳（用过即没；落地作废），让笼口悬空也能起跳
-    if (this.grounded) this.exitJump = false;
+    // 落地同时清 jumpCutting：短跳截短只在本次跳跃的上升段有效——
+    // 不清的话，之后任何非跳跃来源的上升速度（泡泡载升等）都会被松键截短砍掉大半
+    if (this.grounded) {
+      this.exitJump = false;
+      this.jumpCutting = false;
+    }
     if (this.jumpBuf > 0 && (this.coyote > 0 || this.exitJump)) {
       this.vy = -JUMP_VEL;
       this.jumpBuf = 0;
@@ -711,6 +721,8 @@ export interface StalkLike {
 export interface WorldLike {
   locked: boolean;
   solidAtPx(x: number, y: number): boolean;
+  /** 脚下（任意点）地面材质：冰面滑、岩壁稳。 */
+  groundMaterial(x: number, y: number): "ice" | "solid" | "none";
   /** 攀爬豆茎专用：无视藤蔓墙的实心判定（原生藤蔓与豆茎互不干扰）。 */
   climbSolidAtPx(x: number, y: number): boolean;
   dynamicSolids(): Rect[];

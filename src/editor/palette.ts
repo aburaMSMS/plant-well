@@ -37,7 +37,7 @@ export const CATEGORIES = [
   { id: "switch", label: "开关类", hint: "机关与触发源" },
   { id: "scene", label: "场景类", hint: "无碰撞或弱交互的摆设" },
   { id: "light", label: "光源类", hint: "自带光源的发光物：位置即光源中心，半径/亮度可调" },
-  { id: "move", label: "移动类", hint: "无伤害、辅助角色移动" },
+  { id: "move", label: "平台类", hint: "角色可站可乘的载体（不一定会动）" },
   { id: "item", label: "道具类", hint: "全局唯一，一件只能放一处" },
   { id: "damage", label: "伤害类", hint: "接触会受伤/死亡" },
   { id: "life", label: "生命类", hint: "有行为的生物" },
@@ -48,6 +48,8 @@ export type CatId = (typeof CATEGORIES)[number]["id"];
 export const TILES = [
   { ch: "#", label: "实心岩壁", color: "#454f5e" },
   { ch: ".", label: "空气", color: "#14181f" },
+  { ch: "*", label: "冰块", color: "#9fd0e8" },
+  { ch: "@", label: "黑幕", color: "rgba(96,106,120,0.45)" },
 ] as const; // 尖刺不是瓦片：一律用伤害类的地刺物件
 
 export const OBJ_SPECS: ObjSpec[] = [
@@ -192,6 +194,24 @@ export const OBJ_SPECS: ObjSpec[] = [
     hint: "蹦菇：可悬空放置（无需贴地）；帽顶可站、落下弹起（也会戳破泡泡）。",
     fields: [
       { key: "location", label: "位置", kind: "location" },
+    ],
+  },
+  {
+    type: "flora", label: "花", color: "#f0a8c8", solid: false,
+    cat: "scene",
+    hint: "场景花卉：小花/向日葵/牡丹/油菜花（属性栏选品种）。颜色受房间主题色渲染倾向。无碰撞。",
+    fields: [
+      { key: "location", label: "位置", kind: "location" },
+      { key: "variety", label: "品种", kind: "enum", options: ["小花", "向日葵", "牡丹", "油菜花"] },
+    ],
+  },
+  {
+    type: "grass", label: "草", color: "#8ac878", solid: false,
+    cat: "scene",
+    hint: "场景草类：小草/灌木/蕨丛（属性栏选品种）。颜色受房间主题色渲染倾向。无碰撞。",
+    fields: [
+      { key: "location", label: "位置", kind: "location" },
+      { key: "variety", label: "品种", kind: "enum", options: ["小草", "灌木", "蕨丛"] },
     ],
   },
   {

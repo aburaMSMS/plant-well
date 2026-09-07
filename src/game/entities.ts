@@ -1363,6 +1363,126 @@ export class HangingVine extends BaseEntity {
 // ---- 井底小树：暗处挣扎着活下来的矮树。藤蔓与它同宗——泡泡蹭到就破；----
 // 但它对蔓豆茎毫无妨碍：茎可以贴着它长、穿过它爬，互不相扰。
 
+// 场景花卉/草类：纯装饰。品种表 + 手绘像素风各品种；颜色经房间主题色染（倾向不变色）。
+const FLORA_VARIETIES: Record<string, Record<string, { petal: string; core: string; stem: string; h: number }>> = {
+  flower: {
+    小花: { petal: "#f2e8f4", core: "#e8c84a", stem: "#4a7a3a", h: 6 },
+    向日葵: { petal: "#f0c030", core: "#7a4a1a", stem: "#4a7a3a", h: 11 },
+    牡丹: { petal: "#e87a9a", core: "#f2d8a0", stem: "#4a7a3a", h: 8 },
+    油菜花: { petal: "#f0d840", core: "#f0d840", stem: "#5a8a3a", h: 9 },
+  },
+  grass: {
+    小草: { petal: "#5a9a4a", core: "#5a9a4a", stem: "#4a7a3a", h: 5 },
+    灌木: { petal: "#3f7a3a", core: "#2f5a2c", stem: "#3a5a2a", h: 8 },
+    蕨丛: { petal: "#4a8a5a", core: "#3a6a4a", stem: "#3a5a2a", h: 7 },
+  },
+};
+
+export class Flora extends BaseEntity {
+  constructor(tx: number, ty: number, readonly kind: "flower" | "grass", readonly variety: string) {
+    super();
+    this.x = tx * TILE + TILE / 2;
+    this.y = (ty + 1) * TILE; // location=根部格，画在格底
+  }
+  update(_w: World): void {} // 纯装饰：摆动相位在 draw 里按 time 算
+  draw(ctx: CanvasRenderingContext2D, w: World): void {
+    const table = FLORA_VARIETIES[this.kind];
+    const v = table[this.variety] ?? Object.values(table)[0];
+    const tinted = (c: string, k = 0.3) => w.room.decor.tint(c, k);
+    const sway = Math.sin(w.time * 1.7 + this.x * 0.35) * 0.06;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(sway);
+    const stem = tinted(v.stem, 0.25);
+    const petal = tinted(v.petal, 0.3);
+    const core = tinted(v.core, 0.3);
+    const cy = -v.h - 2;
+    if (this.kind === "grass") {
+      if (this.variety === "灌木") {
+        ctx.fillStyle = tinted(v.core, 0.4);
+        ctx.fillRect(-5, -6, 10, 6);
+        ctx.fillStyle = petal;
+        ctx.beginPath();
+        ctx.arc(-2, -6, 3.2, 0, Math.PI * 2);
+        ctx.arc(2.5, -7, 3.6, 0, Math.PI * 2);
+        ctx.arc(0, -9, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = tinted(v.petal, 0.5);
+        ctx.fillRect(-3, -9, 1, 1);
+        ctx.fillRect(2, -6, 1, 1);
+      } else if (this.variety === "蕨丛") {
+        ctx.strokeStyle = stem;
+        ctx.lineWidth = 1;
+        for (const [dx, len, lean] of [[-3, 6, -1], [0, 8, 0], [3, 6, 1]] as const) {
+          ctx.beginPath();
+          ctx.moveTo(dx * 0.4, 0);
+          ctx.quadraticCurveTo(dx * 2, -len * 0.6, dx * 2 + lean * 2, -len);
+          ctx.stroke();
+          ctx.fillStyle = petal;
+          ctx.fillRect(dx * 2 + lean * 2 - 1, -len - 1, 2, 2);
+        }
+      } else {
+        // 小草：三五根叶片
+        ctx.strokeStyle = stem;
+        ctx.lineWidth = 1;
+        for (const [dx, h2] of [[-2, 4], [0, 5], [2, 3.5]] as const) {
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.quadraticCurveTo(dx * 0.6, -h2 * 0.6, dx, -h2);
+          ctx.stroke();
+        }
+        ctx.fillStyle = petal;
+        ctx.fillRect(-1, -6, 1, 1);
+      }
+    } else {
+      // 花：茎 + 品种花冠
+      ctx.strokeStyle = stem;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(1, -v.h * 0.5, 0, -v.h);
+      ctx.stroke();
+      ctx.fillStyle = tinted("#4a7a3a", 0.25);
+      ctx.fillRect(-2, -v.h * 0.45, 2, 1); // 叶
+      if (this.variety === "向日葵") {
+        ctx.fillStyle = petal;
+        for (let a = 0; a < 8; a++) {
+          const ang = (a / 8) * Math.PI * 2 + Math.sin(w.time * 0.9 + this.x) * 0.05;
+          ctx.fillRect(Math.cos(ang) * 4 - 1.5, cy + Math.sin(ang) * 4 - 1.5, 3, 3);
+        }
+        ctx.fillStyle = core;
+        ctx.fillRect(-2, cy - 2, 4, 4);
+      } else if (this.variety === "牡丹") {
+        ctx.fillStyle = petal;
+        ctx.beginPath();
+        ctx.arc(0, cy, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = tinted(v.petal, 0.5);
+        ctx.beginPath();
+        ctx.arc(-1, cy - 1, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = core;
+        ctx.fillRect(-1, cy - 2, 2, 2);
+      } else if (this.variety === "油菜花") {
+        ctx.fillStyle = petal;
+        for (const [dx, dy] of [[-3, -2], [0, -4], [3, -2], [-1, -1], [2, 0]] as const) {
+          ctx.fillRect(dx - 1, cy + dy - 1, 2, 2);
+        }
+      } else {
+        // 小花：五瓣
+        ctx.fillStyle = petal;
+        for (let a = 0; a < 5; a++) {
+          const ang = (a / 5) * Math.PI * 2;
+          ctx.fillRect(Math.cos(ang) * 2.4 - 1, cy + Math.sin(ang) * 2.4 - 1, 2, 2);
+        }
+        ctx.fillStyle = core;
+        ctx.fillRect(-1, cy - 1, 2, 2);
+      }
+    }
+    ctx.restore();
+  }
+}
+
 export class SmallTree extends BaseEntity {
   readonly ht: number; // 树高（格，2~5）：按坐标做种子的确定性随机——同一棵树每次长一样
   readonly rect: Rect; // 树冠+树干的接触区
@@ -2756,6 +2876,8 @@ export const ENTITY_TYPES = {
   shroom: (o: ObjOf<"shroom">) => new BounceShroom(o.location.x, o.location.y),
   vine: (o: ObjOf<"vine">) => new HangingVine(o.location.x, o.location.y, o.h, o.lens, o.hMin),
   tree: (o: ObjOf<"tree">) => new SmallTree(o.location.x, o.location.y, o.h),
+  flora: (o: ObjOf<"flora">) => new Flora(o.location.x, o.location.y, "flower", o.variety ?? "小花"),
+  grass: (o: ObjOf<"grass">) => new Flora(o.location.x, o.location.y, "grass", o.variety ?? "小草"),
   prop: (o: ObjOf<"prop">) => {
     const pd = propById(o.id);
     return pd ? new CustomProp(o.location.x, o.location.y, pd) : [];

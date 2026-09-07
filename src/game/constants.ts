@@ -12,6 +12,10 @@ export const MOVE_SPEED = 72;
 export const GROUND_ACCEL = 900;
 export const AIR_ACCEL = 520;
 export const FRICTION = 1100;
+/** 冰面参数：站上冰块移速略增、松手滑行（衰减只有岩地的 ~5%，可反向移动刹车）。 */
+export const ICE_SPEED_MUL = 1.12;
+export const ICE_FRICTION = 55;
+export const ICE_ACCEL_MUL = 0.55;
 export const JUMP_VEL = 224;
 export const JUMP_CUT = 0.35; // 松开跳跃键时保留的上升速度比例（可变跳高）
 export const COYOTE_TIME = 0.08; // 离开边缘后仍可起跳的宽限
