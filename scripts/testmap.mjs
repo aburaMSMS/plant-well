@@ -44,7 +44,8 @@ export function buildT90() {
       [8, 9, 10, 10, "@"],   // 黑幕袋（走廊顶上方，跳入即显形）
     ],
     objects: [
-      { type: "elevator", id: "TSTELV", location: { room_id: "R91", x: 5, y: 14 }, end: { room_id: "R92", x: 5, y: 13 }, speed: 80 },
+      { type: "elevator", id: "TSTELV", location: { room_id: "R91", x: 5, y: 14 }, end: { room_id: "R92", x: 5, y: 13 }, speed: 80, triggeredBy: ["TSTSW"] },
+      { type: "switch", id: "TSTSW", location: { room_id: "R91", x: 10, y: 15 }, controls: ["TSTELV"], reset: 1 },
     ],
   });
   const r92 = carve({
@@ -68,7 +69,8 @@ export function buildT90() {
       {
         id: "R91", x: 0, y: 0, map: r91,
         objects: [
-          { type: "elevator", id: "TSTELV", location: { room_id: "R91", x: 5, y: 14 }, end: { room_id: "R92", x: 5, y: 13 }, speed: 80 },
+          { type: "elevator", id: "TSTELV", location: { room_id: "R91", x: 5, y: 14 }, end: { room_id: "R92", x: 5, y: 13 }, speed: 80, triggeredBy: ["TSTSW"] },
+          { type: "switch", id: "TSTSW", location: { room_id: "R91", x: 10, y: 15 }, controls: ["TSTELV"], reset: 1 },
         ],
       },
       { id: "R92", x: 1, y: 0, map: r92, objects: [{ type: "savepoint", location: { room_id: "R92", x: 5, y: 15 } }] },

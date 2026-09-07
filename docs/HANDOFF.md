@@ -1,6 +1,10 @@
 # HANDOFF — Plant Well 项目交接（compact 后从这里继续）
 
-> **工作规矩（用户原话，长期有效）**：用户说"commit"= **commit + push 都要执行**（push 会经 pre-push hook 自动部署到 Cloudflare Pages）；只提交不推是不完整的。
+> **工作规矩（用户原话，长期有效，compact 后也必须遵守）**：
+> 1. 用户说"commit" = **commit + push 都要执行**（push 会经 pre-push hook 自动部署到 Cloudflare Pages）；只提交不推是不完整的。
+> 2. **禁止自行运行测试/探针**。只有用户明确说"测试/跑一下探针"时才跑。曾因 compact 忘记此规矩被用户批评多次。
+>    - 自动化回归套件 = `scripts/cdp-verify-fix.mjs`（T90 测试图）——仅在被要求时运行。
+>    - 所有探针已与用户的 M01/M02 解耦（T90 专用图 + withTestMap 自动恢复），但"解耦"不等于"可以随便跑"。
 
 > 最后更新：2026-09-07（**第四十二批：换房算法重构为“连续世界”模型**（用户定案：换房=切视角，不是过门）——①中心点越界即触发（无门槛无吸附）；②黑透瞬间只做**坐标按房差平移**（动量/抛物线/骑泡相对关系原样延续），删掉入口吸附+resolveEmbed 搬迁+fromBelow 那一整套；③黑透前折返自动取消换房；④fade 带 swap/travel 双语义（传送目标写死不随位置）；⑤**电梯出舱赠跳**（player.exitJump：吐出置位、悬空可用一次、落地作废）；⑥**编辑器选点设出生点**（选点设出生点按钮→画布点一格=出生点，Esc 取消）。⑦**探针独立测试图 T90**：`scripts/testmap.mjs` 程序化生成+withTestMap 自动写/切/恢复（崩溃残留自愈），cdp-verify-fix 全部改挂 T90 无头跑，与 M01 彻底解耦（用户改 M01 不再冲突）。验证：tsc 干净；cdp-verify-fix **14/14**（水平连续/缝合挡墙/上升连续不瞬移/电梯跨房+赠跳）；editor-tools 9/9；multimap 23/23；softlock/bubble-cross ✓。⚠ 探针经验：headless 下 CDP keyboard 事件不可靠（静默丢失），按键一律走 `__pw.input.queue.push` 或页内合成 KeyboardEvent；节流帧会伪造状态——断言前等 `w.time` 前进；debugGoto 的 spawnAt 会覆盖紧随其后的坐标设置——先 goto 落稳再改。第四十批（房界缝合+落点择址，详见下文）仍是本模型的地基。)
 
