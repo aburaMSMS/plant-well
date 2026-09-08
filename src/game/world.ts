@@ -416,7 +416,12 @@ export class World {
       tiles,
       entities,
       solids: [],
-      decor: new RoomDecor(id, tiles, pos.y / 6),
+      decor: new RoomDecor(id, tiles, pos.y / 6, (sx, sy) => {
+        // 暴露面缝合查询（供苔藓/草放置）：越界格翻邻房——邻房岩壁贴着的面不算暴露。
+        // 此刻 this.room 还是旧房，但越界路径只用 seamTiles 缓存 + 本房 pos，安全
+        const t = this.tileAtWithSeam(sx * 10 + 5, sy * 10 + 5);
+        return t === Tile.Solid;
+      }),
       voidGrid,
       voidCells,
       wallDepth: buildWallDepth(tiles),
@@ -897,7 +902,9 @@ export class World {
       g.fillStyle = "#020403";
       g.beginPath();
       for (const c of cells) g.rect(c.x * 10, c.y * 10, 10, 10);
-      g.fill();
+      // 同一路径叠涂 3 次：单次 blur 下 1×N 细条的中心只有 ~74% 不透明（用户实测"小块发透明"），
+      // 叠 3 次后细枝核心 ≈98%、厚核全实——羽化过渡不变
+      for (let i = 0; i < 3; i++) g.fill();
       g.filter = "none";
       return g.canvas;
     });

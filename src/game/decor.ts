@@ -266,7 +266,7 @@ export class RoomDecor {
   private mossColor: string;
   private glowLayer: HTMLCanvasElement | null = null;
 
-  constructor(key: string, tiles: Tilemap, depth: number) {
+  constructor(key: string, tiles: Tilemap, depth: number, seamSolid?: (cx: number, cy: number) => boolean) {
     this.palette = paletteFor(depth);
     const rng = mulberry32(hashKey(key));
     const p = this.palette;
@@ -275,14 +275,21 @@ export class RoomDecor {
     const defMoss = ROOMS[key]?.roomColor;
     this.mossColor = defMoss ? hexToRgb(defMoss) : defaultMoss(depth, rng);
 
+    // 暴露面判定（苔藓/草/藤都长在"朝空气的面上"）：
+    // - 本房越界 → 翻邻房（缝合）：邻房贴着岩壁的面不算暴露，不长苔藓；无邻房=朝世界外，照旧算暴露
+    // - 邻格是冰块（实心但非岩壁）不算暴露——草/苔藓不从冰块底下长出来
+    const open = (cx: number, cy: number): boolean => {
+      if (cx >= 0 && cy >= 0 && cx < 32 && cy < 18) return tiles.get(cx, cy) === Tile.Air;
+      return seamSolid ? !seamSolid(cx, cy) : true;
+    };
 
     for (let cy = 0; cy < 18; cy++) {
       for (let cx = 0; cx < 32; cx++) {
         const solid = tiles.get(cx, cy) === Tile.Solid;
-        const airAbove = tiles.get(cx, cy - 1) !== Tile.Solid;
-        const airBelow = tiles.get(cx, cy + 1) !== Tile.Solid;
-        const airLeft = tiles.get(cx - 1, cy) !== Tile.Solid;
-        const airRight = tiles.get(cx + 1, cy) !== Tile.Solid;
+        const airAbove = open(cx, cy - 1);
+        const airBelow = open(cx, cy + 1);
+        const airLeft = open(cx - 1, cy);
+        const airRight = open(cx + 1, cy);
 
         if (solid && airAbove) {
           // 发光苔藓：贴岩壁顶沿，星散分布
