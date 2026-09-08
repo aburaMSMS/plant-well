@@ -29,6 +29,48 @@ export interface UIState {
 
 const ZOOMS = [10, 12, 14, 16, 18, 20, 24, 28, 32];
 
+/**
+ * 岩壁深度场（多源 BFS，与 game/world.ts buildWallDepth 同语义）：源=所有非岩格，
+ * 4 向逐层渗进岩壁——用于"离空气越远越暗"的微渐暗（编辑器与游戏所见即所得）。
+ */
+function buildWallDepthRows(map: string[]): Uint8Array {
+  const W = ROOM_COLS;
+  const H = ROOM_ROWS;
+  const depth = new Uint8Array(W * H);
+  const queue = new Int16Array(W * H);
+  let qh = 0;
+  let qt = 0;
+  for (let i = 0; i < W * H; i++) {
+    if ((map[(i / W) | 0]?.[i % W] ?? ".") !== "#") {
+      depth[i] = 0;
+      queue[qt++] = i;
+    } else {
+      depth[i] = 255;
+    }
+  }
+  while (qh < qt) {
+    const i = queue[qh++];
+    const x = i % W;
+    const y = (i / W) | 0;
+    const d = depth[i];
+    if (d >= 80) continue;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const ni = ny * W + nx;
+      if (depth[ni] === 255) {
+        depth[ni] = d + 1;
+        queue[qt++] = ni;
+      }
+    }
+  }
+  return depth;
+}
+
+/** 岩壁渐暗的每档叠加色（深度 2/3/4/≥5 格，封顶 18%）。 */
+const WALL_SHADE = ["rgba(3,6,9,0.05)", "rgba(3,6,9,0.10)", "rgba(3,6,9,0.15)", "rgba(3,6,9,0.18)"];
+
 /** hex → rgba() 字符串。 */
 function hexA(hex: string, a: number): string {
   const n = parseInt(hex.slice(1), 16);
@@ -249,6 +291,7 @@ export class EditorRenderer {
 
   private drawTiles(c: CanvasRenderingContext2D, map: string[]): void {
     const ts = this.ts;
+    const depth = buildWallDepthRows(map);
     for (let y = 0; y < ROOM_ROWS; y++) {
       const row = map[y] ?? "";
       for (let x = 0; x < ROOM_COLS; x++) {
@@ -262,6 +305,12 @@ export class EditorRenderer {
         } else if (ch === "#") {
           c.fillStyle = "#3d4653";
           c.fillRect(p.x, p.y, ts, ts);
+          // 深度渐暗（与游戏同款）：离空气越远越暗；暴露沿不压，保持描边读得清
+          const dep = depth[y * ROOM_COLS + x];
+          if (dep > 1) {
+            c.fillStyle = WALL_SHADE[Math.min(dep - 2, 3)];
+            c.fillRect(p.x, p.y, ts, ts);
+          }
           if ((map[y - 1]?.[x] ?? ".") !== "#") {
             c.fillStyle = "rgba(255,255,255,0.10)";
             c.fillRect(p.x, p.y, ts, Math.max(1, ts / 8));

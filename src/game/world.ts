@@ -52,6 +52,48 @@ import { Tile, Tilemap } from "../engine/tiles";
 const SAVE_KEY = "plantwell.save.v1";
 const FADE_T = 0.1; // 黑场眨眼单程时长（秒）：出 0.1 + 入 0.1
 
+/**
+ * 岩壁深度场（多源 BFS）：源=所有非岩壁格（空气/冰），4 向逐层渗进岩壁。
+ * 只表意不做精确光照——用于"离空气越远越暗"的微渐暗。
+ */
+function buildWallDepth(tiles: Tilemap): Uint8Array {
+  const W = 32;
+  const H = 18;
+  const depth = new Uint8Array(W * H);
+  const queue = new Int16Array(W * H);
+  let qh = 0;
+  let qt = 0;
+  for (let i = 0; i < W * H; i++) {
+    if (tiles.cells[i] !== Tile.Solid) {
+      depth[i] = 0;
+      queue[qt++] = i;
+    } else {
+      depth[i] = 255; // 未触达标记
+    }
+  }
+  while (qh < qt) {
+    const i = queue[qh++];
+    const x = i % W;
+    const y = (i / W) | 0;
+    const d = depth[i];
+    if (d >= 80) continue; // 深度封顶（渐暗早就到顶了）
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const ni = ny * W + nx;
+      if (depth[ni] === 255) {
+        depth[ni] = d + 1;
+        queue[qt++] = ni;
+      }
+    }
+  }
+  return depth;
+}
+
+/** 岩壁渐暗的每档叠加色（深度 2/3/4/≥5 格，封顶 18%——微微一层即可）。 */
+const WALL_SHADE = ["rgba(3,6,9,0.05)", "rgba(3,6,9,0.10)", "rgba(3,6,9,0.15)", "rgba(3,6,9,0.18)"];
+
 interface RoomInst {
   cx: number;
   cy: number;
@@ -65,6 +107,8 @@ interface RoomInst {
   voidCells: { x: number; y: number }[][];
   /** 黑幕软边遮罩（惰性构建）：all=全部区域的并集；holes[i]=整屏黑抠掉区域 i（边缘都做了羽化）。 */
   voidMasks?: { all: HTMLCanvasElement; holes: HTMLCanvasElement[] };
+  /** 岩壁深度场：每格到最近非岩壁格（空气/冰/房沿）的 4 向步数（非岩=0）。用于岩壁向内渐暗。 */
+  wallDepth: Uint8Array;
 }
 
 interface SaveData {
@@ -375,6 +419,7 @@ export class World {
       decor: new RoomDecor(id, tiles, pos.y / 6),
       voidGrid,
       voidCells,
+      wallDepth: buildWallDepth(tiles),
     };
     // 挂在视野外的跨房载具：家房被加载就归位（同 id 的数据原件让位给它）
     if (this.detached.length) {
@@ -1966,6 +2011,12 @@ export class World {
           if (h % 17 === 0) {
             ctx.fillStyle = pal.rockEdge;
             ctx.fillRect(cx * 10 + ((h >> 6) % 7), cy * 10 + ((h >> 2) % 6), 1, 3);
+          }
+          // 岩壁深度渐暗：离空气越远越暗（暴露沿=深度 1 不压，保持沿口读得清）
+          const dep = this.room.wallDepth[cy * 32 + cx];
+          if (dep > 1) {
+            ctx.fillStyle = WALL_SHADE[Math.min(dep - 2, 3)];
+            ctx.fillRect(cx * 10, cy * 10, 10, 10);
           }
           if (above !== Tile.Solid) {
             // 可站立沿：矿石浅边，和装饰草（后画、半透明）分开读
