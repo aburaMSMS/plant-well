@@ -306,6 +306,15 @@ await withTestMap(async () => {
     });
     ok("F4 玩家在区域内：所在区域显形（玩家像素可见）", pix.active >= 0 && pix.inside > 100, JSON.stringify(pix));
     ok("F5 玩家在区域内：区域外世界全黑", pix.active >= 0 && pix.outside < 60, JSON.stringify(pix));
+    // F6 边缘羽化：黑幕遮罩 alpha 剖面应连续——深处核心近不透明、缘外 1px 渐变、远处全透
+    const soft = await page.evaluate(() => {
+      const w = window.__pw.world;
+      const m = w.room.voidMasks.all.getContext("2d").getImageData(0, 0, 320, 180).data;
+      const a = (x, y) => m[(y * 320 + x) * 4 + 3];
+      // 黑幕袋左缘 x=80（col8 起）：95=深核内、79=缘外 1px、66=缘外 14px（y=105 在袋 rows9-12 内）
+      return { core: a(95, 105), near: a(79, 105), far: a(66, 105) };
+    });
+    ok("F6 黑幕边缘羽化（核心实、边缘渐变）", soft.core >= 246 && soft.near > 20 && soft.near < 230 && soft.far < 12, JSON.stringify(soft));
   }
 
   ok("无页面 JS 错误", errors.length === 0, errors.join(" | ").slice(0, 200));

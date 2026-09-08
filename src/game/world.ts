@@ -63,6 +63,8 @@ interface RoomInst {
   /** 黑幕连通区域：voidGrid[y][x]=区域序号（-1=非黑幕）；voidCells[序号]=该区域的格列表。 */
   voidGrid: number[][];
   voidCells: { x: number; y: number }[][];
+  /** 黑幕软边遮罩（惰性构建）：all=全部区域的并集；holes[i]=整屏黑抠掉区域 i（边缘都做了羽化）。 */
+  voidMasks?: { all: HTMLCanvasElement; holes: HTMLCanvasElement[] };
 }
 
 interface SaveData {
@@ -818,35 +820,53 @@ export class World {
   }
 
   /**
-   * 黑幕附着层渲染（画在一切场景内容之后、HUD 之前）：
-   * - 玩家在某块黑幕区域内：整屏涂黑，只把该区域的格“抠亮”（其余世界全不可见）；
-   * - 不在任何区域：本房所有黑幕格涂黑（世界正常可见，黑幕处是漆黑空洞）。
-   * 附着层可叠在岩壁/物品之上——被遮的地方画什么都被盖掉。
+   * 黑幕附着层渲染（画在一切场景内容之后、HUD 之前），软边遮罩离屏一次成型：
+   * - 玩家在某块黑幕区域内：贴"整屏黑抠掉该区域"的洞版——区域连同玩家显形，其余世界不可见；
+   * - 不在任何区域：贴全部区域的并集版——本房黑幕处是漆黑（羽化边），世界其余部分正常。
+   * 羽化让黑幕边缘柔和过渡（用户要求"边缘不要太尖锐"）；洞的抠法作用在离屏黑幕层上，
+   * 不碰主画布的场景像素（主画布 destination-out 会把场景一起擦穿=全黑 bug，勿改回）。
    */
   private drawVoid(ctx: CanvasRenderingContext2D, resX: number, resY: number): void {
-    const grid = this.room.voidGrid;
+    if (!this.room.voidCells.length) return;
+    this.room.voidMasks ??= this.buildVoidMasks();
     const cx = Math.floor(this.player.x / 10);
     const cy = Math.floor(this.player.y / 10);
-    const active = cy >= 0 && cy < 18 && cx >= 0 && cx < 32 ? grid[cy][cx] : -1;
-    ctx.fillStyle = "#020403";
-    if (active < 0) {
-      for (const region of this.room.voidCells) {
-        for (const c of region) ctx.fillRect(c.x * 10 - resX, c.y * 10 - resY, 10, 10);
-      }
-      return;
-    }
-    // 玩家在黑幕内：整屏涂黑、只把所在区域"留亮"——用 clip even-odd（大矩形减去区域格）。
-    // 不能用 destination-out 抠主画布：它会把已画好的场景像素一并擦成透明，
-    // 透出的是页面底色——看起来仍是全屏黑（用户实测 bug）。
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(-resX, -resY, ROOM_W, ROOM_H);
-    for (const c of this.room.voidCells[active]) {
-      ctx.rect(c.x * 10 - resX, c.y * 10 - resY, 10, 10);
-    }
-    ctx.clip("evenodd");
-    ctx.fillRect(-resX, -resY, ROOM_W, ROOM_H);
-    ctx.restore();
+    const active = cy >= 0 && cy < 18 && cx >= 0 && cx < 32 ? this.room.voidGrid[cy][cx] : -1;
+    const img = active < 0 ? this.room.voidMasks.all : this.room.voidMasks.holes[active];
+    ctx.drawImage(img, -resX, -resY);
+  }
+
+  /** 离屏构建软边黑幕遮罩：区域形状 blur 羽化后，并集成"全黑版"，再 destination-out 成每区域的"洞版"。 */
+  private buildVoidMasks(): { all: HTMLCanvasElement; holes: HTMLCanvasElement[] } {
+    const layer = (): CanvasRenderingContext2D => {
+      const c = document.createElement("canvas");
+      c.width = ROOM_W;
+      c.height = ROOM_H;
+      return c.getContext("2d")!;
+    };
+    // CSS blur(r) 的 σ≈r/2：5px 羽化 ≈ 2.5σ——单格宽的细枝核心也接近全黑，边缘过渡约半格
+    const FEATHER = 5;
+    const shapes = this.room.voidCells.map((cells) => {
+      const g = layer();
+      g.filter = `blur(${FEATHER}px)`;
+      g.fillStyle = "#020403";
+      g.beginPath();
+      for (const c of cells) g.rect(c.x * 10, c.y * 10, 10, 10);
+      g.fill();
+      g.filter = "none";
+      return g.canvas;
+    });
+    const all = layer();
+    for (const s of shapes) all.drawImage(s, 0, 0); // 并集：相邻区域半透明边自然叠实
+    const holes = shapes.map((s) => {
+      const g = layer();
+      g.fillStyle = "#020403";
+      g.fillRect(0, 0, ROOM_W, ROOM_H);
+      g.globalCompositeOperation = "destination-out";
+      g.drawImage(s, 0, 0); // 只作用于本离屏层的黑幕，不碰主画布
+      return g.canvas;
+    });
+    return { all: all.canvas, holes };
   }
 
   /** 脚下（或任意点）的地面材质：冰面滑、岩壁稳。缝合感知（越界翻邻房）。 */
